@@ -1,5 +1,6 @@
 (ns uglyboids.vision
-  (use uglyboids.vision-colors
+  (use uglyboids.params
+       uglyboids.floodfill
        seesaw.core
        seesaw.graphics)
   (import [java.io File]
@@ -7,6 +8,11 @@
           [java.awt.image BufferedImage]
           [javax.imageio ImageIO]
           [javax.swing JFrame JPanel]))
+
+(def ^:dynamic *debug* false)
+
+(defn dbg [& args]
+  (when *debug* (apply println args)))
 
 (def orig-img (atom nil))
 (def display-img (atom nil))
@@ -48,148 +54,104 @@
                 (. Math pow (- b b2) 2))]
     (<= dist (* tol tol))))
 
-(defn classify-img!
-  []
-  (let [^BufferedImage img @orig-img]
-    (doseq [[type seed-rgb] seed-colors
-            :let [[r g b] seed-rgb
-                  seed-int (rgb-int seed-rgb)
-                  pxx (atom 0)
-                  tol (get color-tolerance type)]
-            :when (not= type :sky)]
-      (println "Going to classify " type)
-      (doseq [x (range min-x (inc max-x))
-              y (range min-y (inc max-y))
-              :let [cell (get-cell [x y])]
-              :when (nil? (:type @cell))]
-        (let [xyint (.getRGB img x y)]
-          (when (color-within-tol? (r-g-b xyint) seed-rgb tol)
-            (swap! cell assoc :type type)
-            (swap! pxx inc)
-            (.setRGB class-img x y seed-int))))
-      (reset! display-img class-img)
-      (invoke-later (repaint! (select @the-frame [:#canvas])))
-      (println "found " @pxx " pixels within tol " tol))))
-
-(defn neighbour-idx
-  [[x y]]
-  (set (for [[xd yd] (list [-1 0]
-                           [0 -1]
-                           [1 0]
-                           [0 1])
-             :let [xi (+ x xd)
-                   yi (+ y yd)]
-             :when (and (< -1 xi px-width)
-                        (< -1 yi px-height))]
-         [xi yi])))
-
 (defn test-xy
-  [xy type]
-  (let [cell (get-cell xy)
-        {t :type
-         i :id} @cell]
-    (when (and (= t type) (nil? i))
-      cell)))
+  "Tests pixel [x y] that it
+   (a) is not already classified and
+   (b) matches given colors within tolerance."
+  [[x y] ^BufferedImage img colors tol]
+  (let [cell (get-cell [x y])
+        id (:id @cell)]
+    (when (nil? id)
+      (let [xy-rgb (r-g-b (.getRGB img x y))]
+        (loop [colors-to-go colors]
+          (when-let [test-rgb (first colors-to-go)]
+            (if (color-within-tol? xy-rgb test-rgb tol)
+              true
+              (recur (next colors-to-go)))))))))
 
-(defn scanline-r
-  "adapted from Recursive Scanline Method at
-   http://www.codeproject.com/Articles/6017/QuickFill-An-efficient-flood-fill-algorithm"
-  [x1 x2 y test mark]
-  (when (<= min-y y max-y)
-    ;; scan left
-    (let [left-xs (doall (for [x (range x1 min-x -1)
-                               :while (test [x y])]
-                           (do (mark [x y])
-                               (dec x))))
-          leftmost (if (empty? left-xs) x1 (last left-xs))]
-      ;(swank.core/break)
-      (when (< leftmost x1)
-        (scanline-r leftmost x1 (dec y) test mark)
-        (scanline-r leftmost x1 (inc y) test mark))
-      ;; scan right
-      (let [right-xs (doall (for [x (range x2 max-x)
-                                  :while (test [x y])]
-                              (do (mark [x y])
-                                  (inc x))))
-            rightmost (if (empty? right-xs) x2 (last right-xs))]
-        (when (> rightmost x2)
-          (scanline-r x2 rightmost (dec y) test mark)
-          (scanline-r x2 rightmost (inc y) test mark))
-        ;; scan betweens
-        (let [x1* (if (< leftmost x1) (inc x1) x1)
-              x2* (if (> rightmost x2) (dec x2) x2)]
-          (loop [x-from x1*
-                 x x1*]
-            (when (<= x (min x2* max-x))
-              ;(println "scanning betweens: " {:x x :x-from x-from :x1* x1*})
-              (if (test [x y])
-                (do
-                  (mark [x y])
-                  (recur x-from (inc x)))
-                (do
-                  (when (> x x-from)
-                    (scanline-r x-from (dec x) (dec y) test mark)
-                    (scanline-r x-from (dec x) (inc y) test mark))
-                  (let [skip-xs (doall (for [x (range (inc x) (inc (min x2* max-x)))
-                                             :while (not (test [x y]))]
-                                         x))
-                        nextx (if (empty? skip-xs) (inc x) (last skip-xs))]
-                    (recur nextx nextx)))))))))))
-
-(defn scanline-r-cells
-  [x y id type]
+(defn scan-object!
+  [img [x y] id type colors tol]
   (let [obj (atom {:type type
                    :coords []
                    :x-range [x x]
                    :y-range [y y]})
         test (fn [xy]
-               (test-xy xy type))
+               (test-xy xy img colors tol))
         minmax (fn [[omin omax] new]
                  [(min omin new) (max omax new)])
         mark (fn [[x y]]
                ;(println "marking cell " x y " id " id " type " type)
                (let [cell (get-cell [x y])]
-                 (swap! cell assoc :id id))
+                 (swap! cell assoc :id id :type type))
                (swap! obj (fn [o]
                             (-> o
                                 (update-in [:coords] conj [x y])
                                 (update-in [:x-range] minmax x)
-                                (update-in [:y-range] minmax y)))))]
-    (scanline-r x x y test mark)
+                                (update-in [:y-range] minmax y))))
+               (when *debug*
+                 (let [n (count (:coords @obj))]
+                   (when (zero? (mod n 2000))
+                     (println "object id " id " reached " n " pixels so far.")))))]
+    ;(scanline-r x x y test mark [min-x max-x] [min-y max-y])
+    (scanline x y test mark [min-x max-x] [min-y max-y])
     obj))
 
 (defn identify-objects!
   []
-  (let [nobj (atom 0)
+  (let [id-counter (atom 0)
+        ^BufferedImage img @orig-img
         ^BufferedImage class-img (BufferedImage. px-width px-height
                                                  BufferedImage/TYPE_INT_RGB)
-        black-int (.getRGB Color/BLACK)]
+        black-int (.getRGB Color/BLACK)
+        canv (select @the-frame [:#canvas])]
+    (reset! objs {})
     (doseq [x (range 0 px-width)
             y (range 0 px-height)]
       (.setRGB class-img x y black-int))
-    (doseq [[type [r g b]] seed-colors
-            :let [my-colors (get ab-colors type)
-                  [min-px max-px] (get size-range type)]
-            :when (not= type :sky)]
-      (println "Going to floodfill " type)
+    (reset! display-img class-img)
+    (doseq [[type params] object-params
+            :let [my-colors (:colors params)
+                  seed-rgb (first my-colors)
+                  seed-int (rgb-int seed-rgb)
+                  tol (:tolerance params)
+                  pxx (atom 0)
+                  [min-px max-px] (:size params)]
+            :when (not (contains? #{:sky :tap} type))]
+      (println "Identifying objects of type " type)
       (doseq [x (range min-x (inc max-x))
               y (range min-y (inc max-y))
               :let [cell (get-cell [x y])]
-              :when (test-xy [x y] type)]
-        (swap! nobj inc)
-        (let [id @nobj
-              obj (scanline-r-cells x y id type)
-              pxx (count (:coords @obj))]
-          (when (<= min-px pxx max-px)
-            (swap! objs assoc id obj)
-          ;(let [obj (flood-out [x y] type id)]
-            (println "object id " id " type " type " was size " pxx
-                     " x-range " (:x-range @obj)
-                     " y-range " (:y-range @obj))))))))
+              :when (nil? (:type @cell))]
+        (let [xy-rgb (r-g-b (.getRGB img x y))]
+          (when (color-within-tol? xy-rgb seed-rgb tol)
+            ;; detected the seed color of this object type
+            (let [id (swap! id-counter inc)
+                  obj (scan-object! img [x y] id type my-colors tol)
+                  coords (:coords @obj)
+                  pxx (count coords)]
+              (if (<= min-px pxx max-px)
+                (do
+                  (swap! objs assoc id obj)
+                  (doseq [[x y] (:coords @obj)]
+                    (.setRGB class-img x y seed-int))
+                  (dbg "object id " id " type " type " was size " pxx
+                       " x-range " (:x-range @obj)
+                       " y-range " (:y-range @obj)))
+                ;; otherwise ignore it
+                (do
+                  (dbg "object id " id " type " type " was size " pxx
+                       " x-range " (:x-range @obj)
+                       " y-range " (:y-range @obj)
+                       " (too small/big)"))
+                ;; reset the cells?
+                  ;(doseq [[x y] (:coords @obj)]
+                    ;(reset! (get-cell [x y]) {:id nil :type nil})))
+                )))))
+      (repaint! @the-frame));canv))
+    (count @objs)))
 
 (defn segment-img!
   []
-  (classify-img!)
   (identify-objects!))
 
 (defn paint
