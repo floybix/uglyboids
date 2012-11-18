@@ -1,4 +1,4 @@
-(ns uglyboids.params)
+(ns uglyboids.vision.params)
 
 ;; based on files
 ;; vision/Matlab/segmentationColorInitialization.m

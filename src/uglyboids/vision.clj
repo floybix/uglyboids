@@ -1,6 +1,5 @@
 (ns uglyboids.vision
-  (use uglyboids.params
-       uglyboids.floodfill
+  (use [uglyboids.vision params floodfill shape-detection]
        seesaw.core
        seesaw.graphics)
   (import [java.io File]
@@ -54,6 +53,8 @@
                 (. Math pow (- b b2) 2))]
     (<= dist (* tol tol))))
 
+;; TODO:::: use aget / aset-int for speed?
+
 (defn test-xy
   "Tests pixel [x y] that it
    (a) is not already classified and
@@ -92,11 +93,10 @@
                  (let [n (count (:coords @obj))]
                    (when (zero? (mod n 2000))
                      (println "object id " id " reached " n " pixels so far.")))))]
-    ;(scanline-r x x y test mark [min-x max-x] [min-y max-y])
     (scanline x y test mark [min-x max-x] [min-y max-y])
     obj))
 
-(defn identify-objects!
+(defn identify-blobs!
   []
   (let [id-counter (atom 0)
         ^BufferedImage img @orig-img
@@ -116,7 +116,8 @@
                   tol (:tolerance params)
                   pxx (atom 0)
                   [min-px max-px] (:size params)]
-            :when (not (contains? #{:sky :tap} type))]
+            :when (not (contains? #{:sky :tap :trajectory :ground
+                                    :blue-bird :yellow-bird :glass} type))]
       (println "Identifying objects of type " type)
       (doseq [x (range min-x (inc max-x))
               y (range min-y (inc max-y))
@@ -138,21 +139,27 @@
                        " x-range " (:x-range @obj)
                        " y-range " (:y-range @obj)))
                 ;; otherwise ignore it
-                (do
-                  (dbg "object id " id " type " type " was size " pxx
-                       " x-range " (:x-range @obj)
-                       " y-range " (:y-range @obj)
-                       " (too small/big)"))
+                nil
                 ;; reset the cells?
-                  ;(doseq [[x y] (:coords @obj)]
-                    ;(reset! (get-cell [x y]) {:id nil :type nil})))
+                                        ;(doseq [[x y] (:coords @obj)]
+                                        ;(reset! (get-cell [x y]) {:id nil :type nil})))
                 )))))
-      (repaint! @the-frame));canv))
+      (invoke-later (repaint! canv)))
     (count @objs)))
 
 (defn segment-img!
   []
-  (identify-objects!))
+  (identify-blobs!)
+  (binding [*debug* true]
+    (doseq [[id obja] @objs
+            :let [obj @obja]]
+      (dbg "object of id " id " type " (:type obj))
+      (let [type (:type obj)
+            shp (shape-from-blob (:coords obj)
+                                 (:x-range obj)
+                                 (:y-range obj)
+                                 true)]
+        (dbg shp)))))
 
 (defn paint
   [c g]
@@ -165,7 +172,7 @@
         img (ImageIO/read (File. screenshot))]
     (reset! orig-img img)
     (reset! display-img img)
-    (invoke-later
+    ;(invoke-later
      (reset! the-frame
              (-> (frame :title "Hello",
                         :width px-width
@@ -179,4 +186,5 @@
                                                                                         :handler (fn [_] (segment-img!)))]))
                         :on-close :dispose)
                                         ;pack!
-                 show!)))))
+                 show!))
+    (segment-img!)))

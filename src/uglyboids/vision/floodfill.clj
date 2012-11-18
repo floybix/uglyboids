@@ -1,4 +1,4 @@
-(ns uglyboids.floodfill)
+(ns uglyboids.vision.floodfill)
 
 (defn scanline
   "Scanline Floodfill Algorithm. Adapted from
