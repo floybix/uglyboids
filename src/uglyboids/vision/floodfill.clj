@@ -2,49 +2,56 @@
 
 (defn scanline
   "Scanline Floodfill Algorithm. Adapted from
-   http://lodev.org/cgtutor/floodfill.html#Scanline_Floodfill_Algorithm_With_Stack"
+   http://lodev.org/cgtutor/floodfill.html#Scanline_Floodfill_Algorithm_With_Stack
+   Returns the filled coordinates."
   [x0 y0 test mark [min-x max-x] [min-y max-y]]
-  (loop [stack (conj [] [x0 y0])]
-    (when (seq stack)
+  (loop [stack (conj [] [x0 y0])
+         coords []]
+    (if (seq stack)
       (let [[x y] (peek stack)
             ;; follow y pixels down until find an edge
             y1 (loop [y* y]
                  (if (and (>= y* min-y) (test [x y*]))
                    (recur (dec y*))
                    (inc y*)))
-            more (loop [y1 y1
-                        span-left false
-                        span-right false
-                        sub-stack []]
-                   (if (and (<= y1 max-y) (test [x y1]))
-                     (do
-                       (mark [x y1])
-                       (let [go-left (and (not span-left)
-                                          (> x min-x)
-                                          (test [(dec x) y1]))
-                             stop-left (and span-left
-                                            (> x min-x)
-                                            (not (test [(dec x) y1])))
-                             go-right (and (not span-right)
-                                           (< x max-x)
-                                           (test [(inc x) y1]))
-                             stop-right (and span-right
-                                             (< x max-x)
-                                             (not (test [(inc x) y1])))
-                             new-left (if go-left true
-                                          (if stop-left false
-                                              span-left))
-                             new-right (if go-right true
-                                           (if stop-right false
-                                               span-right))
-                             to-push (concat
-                                      (when go-left (list [(dec x) y1]))
-                                      (when go-right (list [(inc x) y1])))]
-                         (recur (inc y1) new-left new-right
-                                (into sub-stack to-push))))
-                     ;; return from inner loop
-                     sub-stack))]
-        (recur (into (pop stack) more))))))
+            [ss sc] (loop [y1 y1
+                           span-left false
+                           span-right false
+                           sub-stack []
+                           sub-coords []]
+                      (if (and (<= y1 max-y) (test [x y1]))
+                        (do
+                          (mark [x y1])
+                          (let [go-left (and (not span-left)
+                                             (> x min-x)
+                                             (test [(dec x) y1]))
+                                stop-left (and span-left
+                                               (> x min-x)
+                                               (not (test [(dec x) y1])))
+                                go-right (and (not span-right)
+                                              (< x max-x)
+                                              (test [(inc x) y1]))
+                                stop-right (and span-right
+                                                (< x max-x)
+                                                (not (test [(inc x) y1])))
+                                new-left (if go-left true
+                                             (if stop-left false
+                                                 span-left))
+                                new-right (if go-right true
+                                              (if stop-right false
+                                                  span-right))
+                                to-push (concat
+                                         (when go-left (list [(dec x) y1]))
+                                         (when go-right (list [(inc x) y1])))]
+                            (recur (inc y1) new-left new-right
+                                   (into sub-stack to-push)
+                                   (conj sub-coords [x y1]))))
+                        ;; return from inner loop
+                        [sub-stack sub-coords]))]
+        (recur (into (pop stack) ss)
+               (into coords sc)))
+      ;; return from outer loop
+      coords)))
 
 (defn scanline-r
   "Recursive Scanline Method. Adapted from

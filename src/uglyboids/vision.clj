@@ -29,8 +29,6 @@
                   (vec (for [x (range 0 px-width)]
                          (atom {:type nil :id nil}))))))
 
-;(def cells2d (to-array-2d cells))
-
 (def objs (atom {}))
 
 (defn get-cell
@@ -39,8 +37,11 @@
 
 (defn r-g-b
   [int-color]
-  (let [c (Color. int-color)]
-    [(.getRed c) (.getGreen c) (.getBlue c)]))
+;  (let [c (Color. int-color)]
+;    [(.getRed c) (.getGreen c) (.getBlue c)]))
+  [(bit-and (bit-shift-right int-color 16) 0xFF)
+   (bit-and (bit-shift-right int-color 8) 0xFF)
+   (bit-and int-color 0xFF)])
 
 (defn rgb-int
   [[r g b]]
@@ -53,7 +54,7 @@
                 (. Math pow (- b b2) 2))]
     (<= dist (* tol tol))))
 
-;; TODO:::: use aget / aset-int for speed?
+(def blob-info (atom {}))
 
 (defn test-xy
   "Tests pixel [x y] that it
@@ -70,31 +71,38 @@
               true
               (recur (next colors-to-go)))))))))
 
+(defn bounding-box
+  [coords]
+  (loop [x-lower px-width
+         y-lower px-height
+         x-upper 0
+         y-upper 0
+         pts coords]
+    (if (seq pts)
+      (let [[x y] (first pts)
+            x (int x)
+            y (int y)]
+        (recur (min x-lower x)
+               (min y-lower y)
+               (max x-upper x)
+               (max y-upper y)
+               (next pts)))
+      ;; return:
+      [[x-lower y-lower] [x-upper y-upper]])))
+
 (defn scan-object!
   [img [x y] id type colors tol]
-  (let [obj (atom {:type type
-                   :coords []
-                   :x-range [x x]
-                   :y-range [y y]})
-        test (fn [xy]
+  (let [test (fn [xy]
                (test-xy xy img colors tol))
-        minmax (fn [[omin omax] new]
-                 [(min omin new) (max omax new)])
         mark (fn [[x y]]
-               ;(println "marking cell " x y " id " id " type " type)
                (let [cell (get-cell [x y])]
-                 (swap! cell assoc :id id :type type))
-               (swap! obj (fn [o]
-                            (-> o
-                                (update-in [:coords] conj [x y])
-                                (update-in [:x-range] minmax x)
-                                (update-in [:y-range] minmax y))))
-               (when *debug*
-                 (let [n (count (:coords @obj))]
-                   (when (zero? (mod n 2000))
-                     (println "object id " id " reached " n " pixels so far.")))))]
-    (scanline x y test mark [min-x max-x] [min-y max-y])
-    obj))
+                 (swap! cell assoc :id id :type type)))
+        coords (scanline x y test mark [min-x max-x] [min-y max-y])
+        [[x0 y0] [x1 y1]] (bounding-box coords)]
+    {:type type
+     :coords coords
+     :x-range [x0 x1]
+     :y-range [y0 y1]}))
 
 (defn identify-blobs!
   []
@@ -116,8 +124,8 @@
                   tol (:tolerance params)
                   pxx (atom 0)
                   [min-px max-px] (:size params)]
-            :when (not (contains? #{:sky :tap :trajectory :ground
-                                    :blue-bird :yellow-bird :glass} type))]
+            :when (not (contains? #{:tap :trajectory :sky
+                                    :blue-bird :yellow-bird} type))]
       (println "Identifying objects of type " type)
       (doseq [x (range min-x (inc max-x))
               y (range min-y (inc max-y))
@@ -128,16 +136,16 @@
             ;; detected the seed color of this object type
             (let [id (swap! id-counter inc)
                   obj (scan-object! img [x y] id type my-colors tol)
-                  coords (:coords @obj)
+                  coords (:coords obj)
                   pxx (count coords)]
               (if (<= min-px pxx max-px)
                 (do
                   (swap! objs assoc id obj)
-                  (doseq [[x y] (:coords @obj)]
+                  (doseq [[x y] coords]
                     (.setRGB class-img x y seed-int))
                   (dbg "object id " id " type " type " was size " pxx
-                       " x-range " (:x-range @obj)
-                       " y-range " (:y-range @obj)))
+                       " x-range " (:x-range obj)
+                       " y-range " (:y-range obj)))
                 ;; otherwise ignore it
                 nil
                 ;; reset the cells?
@@ -151,8 +159,7 @@
   []
   (identify-blobs!)
   (binding [*debug* true]
-    (doseq [[id obja] @objs
-            :let [obj @obja]]
+    (doseq [[id obj] @objs]
       (dbg "object of id " id " type " (:type obj))
       (let [type (:type obj)
             shp (shape-from-blob (:coords obj)
