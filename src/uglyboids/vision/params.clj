@@ -43,8 +43,8 @@
    :wood {:colors (list [226,145,38]
                         [210,127,31]
                         [255,190,99]
-                        [183,106,38]
-                        [144,72,19])    ; border
+                        [183,106,38])
+                        ;[144,72,19])    ; border
           :tolerance 17
           :size [10 5000]}
    :ground {:colors (list [10,19,57]    ; blue
@@ -79,8 +79,8 @@
    :glass {:colors (list [99,194,245]
                          [113,206,248]
                          [148,218,250]
-                         [130,209,248]
-                         [231,247,254]) ; ice-white shine, same as sky
+                         [130,209,248])
+                         ;[231,247,254]) ; ice-white shine, same as sky
            :tolerance 15
            :size [20 5000]}
    :stone {:colors (list [160,160,160]

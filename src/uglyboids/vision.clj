@@ -29,7 +29,9 @@
                   (vec (for [x (range 0 px-width)]
                          (atom {:type nil :id nil}))))))
 
-(def objs (atom {}))
+;; store objects grouped by type, each type wrapping a map in an atom - to be keyed by id
+(def objs (zipmap (keys object-params)
+                  (repeatedly #(atom {}))))
 
 (defn get-cell
   [[x y]]
@@ -102,20 +104,26 @@
     {:type type
      :coords coords
      :x-range [x0 x1]
-     :y-range [y0 y1]}))
+     :y-range [y0 y1]
+     :mid-pt [(quot (+ x0 x1) 2)
+              (quot (+ y0 y1) 2)]
+     }))
+
+(defn deepCopyBI
+  [^BufferedImage bi]
+  (let [cm (.getColorModel bi)
+        raster (.copyData bi nil)]
+    (BufferedImage. cm raster (.isAlphaPremultiplied cm) nil)))
 
 (defn identify-blobs!
   []
   (let [id-counter (atom 0)
         ^BufferedImage img @orig-img
-        ^BufferedImage class-img (BufferedImage. px-width px-height
-                                                 BufferedImage/TYPE_INT_RGB)
-        black-int (.getRGB Color/BLACK)
+        ^BufferedImage class-img (deepCopyBI img)
         canv (select @the-frame [:#canvas])]
-    (reset! objs {})
     (doseq [x (range 0 px-width)
             y (range 0 px-height)]
-      (.setRGB class-img x y black-int))
+      (.setRGB class-img x y (.getRGB (.darker (.darker (Color. (.getRGB class-img x y)))))))
     (reset! display-img class-img)
     (doseq [[type params] object-params
             :let [my-colors (:colors params)
@@ -140,7 +148,7 @@
                   pxx (count coords)]
               (if (<= min-px pxx max-px)
                 (do
-                  (swap! objs assoc id obj)
+                  (swap! (get objs type) assoc id obj)
                   (doseq [[x y] coords]
                     (.setRGB class-img x y seed-int))
                   (dbg "object id " id " type " type " was size " pxx
@@ -153,20 +161,44 @@
                                         ;(reset! (get-cell [x y]) {:id nil :type nil})))
                 )))))
       (invoke-later (repaint! canv)))
-    (count @objs)))
+    (reduce + (map #(count @%) (vals objs)))))
+
+(defn detect-shapes!
+  []
+  (dbg "DETECTING SHAPES")
+  (doseq [type (keys objs)
+          :let [ooatom (get objs type)]]
+    (doseq [[id obj] @ooatom]
+      (dbg "object of type " (:type obj))
+      (let [type (:type obj)
+            geom (shape-from-blob (:coords obj)
+                                  (:x-range obj)
+                                  (:y-range obj)
+                                  true)]
+        (dbg geom)
+        (swap! ooatom assoc-in [id :geom] geom)
+        ;; draw shape for display
+        (let [g (.getGraphics ^BufferedImage @display-img)
+              cc (:coords geom)
+              r (:radius geom)
+              [x y] (:pos geom)
+              sty (style :foreground Color/YELLOW)]
+          (case (:shape geom)
+            :poly (draw g (apply polygon cc) sty)
+            :circle (draw g (circle x y r) sty)
+            nil nil)))))
+  (repaint! @the-frame))
+
+(defn adjust-shapes!
+  []
+  (dbg "ADJUSTING SHAPES"))
 
 (defn segment-img!
   []
   (identify-blobs!)
   (binding [*debug* true]
-    (doseq [[id obj] @objs]
-      (dbg "object of id " id " type " (:type obj))
-      (let [type (:type obj)
-            shp (shape-from-blob (:coords obj)
-                                 (:x-range obj)
-                                 (:y-range obj)
-                                 true)]
-        (dbg shp)))))
+    (detect-shapes!)
+    (adjust-shapes!)))
 
 (defn paint
   [c g]
@@ -194,4 +226,4 @@
                         :on-close :dispose)
                                         ;pack!
                  show!))
-    (segment-img!)))
+     (time (segment-img!))))
