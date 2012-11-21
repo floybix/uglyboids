@@ -120,47 +120,46 @@
   (let [id-counter (atom 0)
         ^BufferedImage img @orig-img
         ^BufferedImage class-img (deepCopyBI img)
-        canv (select @the-frame [:#canvas])]
+        canv (select @the-frame [:#canvas])
+        ok-params (dissoc object-params :tap :trajectory :sky
+                          :blue-bird :yellow-bird)]
     (doseq [x (range 0 px-width)
             y (range 0 px-height)]
       (.setRGB class-img x y (.getRGB (.darker (.darker (Color. (.getRGB class-img x y)))))))
     (reset! display-img class-img)
-    (doseq [[type params] object-params
-            :let [my-colors (:colors params)
-                  seed-rgb (first my-colors)
-                  seed-int (rgb-int seed-rgb)
-                  tol (:tolerance params)
-                  pxx (atom 0)
-                  [min-px max-px] (:size params)]
-            :when (not (contains? #{:tap :trajectory :sky
-                                    :blue-bird :yellow-bird} type))]
-      (println "Identifying objects of type " type)
-      (doseq [x (range min-x (inc max-x))
-              y (range min-y (inc max-y))
-              :let [cell (get-cell [x y])]
-              :when (nil? (:type @cell))]
-        (let [xy-rgb (r-g-b (.getRGB img x y))]
-          (when (color-within-tol? xy-rgb seed-rgb tol)
-            ;; detected the seed color of this object type
-            (let [id (swap! id-counter inc)
-                  obj (scan-object! img [x y] id type my-colors tol)
-                  coords (:coords obj)
-                  pxx (count coords)]
-              (if (<= min-px pxx max-px)
-                (do
-                  (swap! (get objs type) assoc id obj)
-                  (doseq [[x y] coords]
-                    (.setRGB class-img x y seed-int))
-                  (dbg "object id " id " type " type " was size " pxx
-                       " x-range " (:x-range obj)
-                       " y-range " (:y-range obj)))
-                ;; otherwise ignore it
-                nil
-                ;; reset the cells?
+    (invoke-later (repaint! canv))
+    (doseq [x (range min-x (inc max-x))
+            y (range min-y (inc max-y))
+            :let [cell (get-cell [x y])]
+            :when (nil? (:type @cell))]
+      (let [xy-rgb (r-g-b (.getRGB img x y))]
+        (doseq [[type params] ok-params
+                :let [my-colors (:colors params)
+                      seed-rgb (first my-colors)
+                      tol (:tolerance params)]]
+                (when (color-within-tol? xy-rgb seed-rgb tol)
+                  ;; detected the seed color of this object type
+                  (let [id (swap! id-counter inc)
+                        obj (scan-object! img [x y] id type my-colors tol)
+                        coords (:coords obj)
+                        pxx (count coords)
+                        [min-px max-px] (:size params)
+                        seed-int (rgb-int seed-rgb)]
+                    (if (<= min-px pxx max-px)
+                      (do
+                        (swap! (get objs type) assoc id obj)
+                        (doseq [[x y] coords]
+                          (.setRGB class-img x y seed-int))
+                        (invoke-later (repaint! canv))
+                        (dbg "object id " id " type " type " was size " pxx
+                             " x-range " (:x-range obj)
+                             " y-range " (:y-range obj)))
+                      ;; otherwise ignore it
+                      nil
+                      ;; reset the cells?
                                         ;(doseq [[x y] (:coords @obj)]
                                         ;(reset! (get-cell [x y]) {:id nil :type nil})))
-                )))))
-      (invoke-later (repaint! canv)))
+                      ))))))
     (reduce + (map #(count @%) (vals objs)))))
 
 (defn detect-shapes!
