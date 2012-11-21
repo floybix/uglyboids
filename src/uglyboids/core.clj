@@ -3,6 +3,7 @@
         [cljbox2d.testbed :exclude [world-to-px-scale world-to-px px-to-world]] ;:only [*timestep* info-text ground-body]]
         [cljbox2d.vec2d :only [TWOPI PI in-pi-pi
                                v-mag v-angle v-sub polar-xy]]
+        uglyboids.physics-params
         [uglyboids.levels.level-1-2])
   (:require [quil.core :as quil]))
 
@@ -13,23 +14,6 @@
 (def bird (atom nil))
 
 (def aiming? (atom false))
-
-;; note radius is in pixels
-(def bird-attrs
-  {:red {:radius 12
-         :density 5
-         :restitution 0.4}})
-
-(def materials
-  {:static {:density 1}
-   :wood {:density 1}
-   :glass {:density 1}
-   :stone {:density 6}
-   :pig {:density 2}
-   })
-
-(def px-height 1080)
-(def px-width 1920)
 
 (def aspect-ratio (/ px-width px-height))
 
@@ -121,7 +105,7 @@ bounds if necessary to ensure an isometric aspect ratio."
                                       fixt-attr))
           body-attr {:type bodytype
                      :position pos
-                     :linear-damping 0.2
+                     :linear-damping linear-damping
                      :user-data {:type type}}
           bod (if (= (:shape obj) :polyline)
                 (apply body! body-attr shp)
@@ -157,7 +141,7 @@ bounds if necessary to ensure an isometric aspect ratio."
     (let [offs (v-sub focus-world (mouse-world))
           mag (v-mag offs)
           ang (v-angle offs)
-          vel (polar-xy 27 ang)]
+          vel (polar-xy launch-speed ang)]
       (.setLinearVelocity @bird (vec2 vel))
       ;(apply-impulse! @bird impulse (position @bird))
       (reset! aiming? false))))

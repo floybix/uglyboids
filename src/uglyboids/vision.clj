@@ -1,5 +1,6 @@
 (ns uglyboids.vision
   (use [uglyboids.vision params floodfill shape-detection]
+       uglyboids.physics-params
        seesaw.core
        seesaw.graphics)
   (import [java.io File]
@@ -17,9 +18,6 @@
 (def display-img (atom nil))
 (def the-frame (atom nil))
 
-(def px-height 1080)
-(def px-width 1920)
-
 (def min-x 0)
 (def max-x 1885)
 (def min-y 120)
@@ -28,10 +26,6 @@
 (def cells (vec (for [y (range 0 px-height)]
                   (vec (for [x (range 0 px-width)]
                          (atom {:type nil :id nil}))))))
-
-;; store objects grouped by type, each type wrapping a map in an atom - to be keyed by id
-(def objs (zipmap (keys object-params)
-                  (repeatedly #(atom {}))))
 
 (defn get-cell
   [[x y]]
@@ -56,8 +50,6 @@
                 (. Math pow (- b b2) 2))]
     (<= dist (* tol tol))))
 
-(def blob-info (atom {}))
-
 (defn test-xy
   "Tests pixel [x y] that it
    (a) is not already classified and
@@ -72,6 +64,19 @@
             (if (color-within-tol? xy-rgb test-rgb tol)
               true
               (recur (next colors-to-go)))))))))
+
+(defn detect-type-from-color
+  [rgb type-params]
+  (loop [params type-params]
+    (if (seq params)
+      (let [[type my-params] (first params)
+            seed-rgb (first (:colors my-params))
+            tol (:tolerance my-params)]
+        (if (color-within-tol? rgb seed-rgb tol)
+          type
+          (recur (next params))))
+      ;; exhausted types, return:
+      nil)))
 
 (defn bounding-box
   [coords]
@@ -92,7 +97,7 @@
       ;; return:
       [[x-lower y-lower] [x-upper y-upper]])))
 
-(defn scan-object!
+(defn scan-blob
   [img [x y] id type colors tol]
   (let [test (fn [xy]
                (test-xy xy img colors tol))
@@ -102,6 +107,7 @@
         coords (scanline x y test mark [min-x max-x] [min-y max-y])
         [[x0 y0] [x1 y1]] (bounding-box coords)]
     {:type type
+     :id id
      :coords coords
      :x-range [x0 x1]
      :y-range [y0 y1]
@@ -109,95 +115,116 @@
               (quot (+ y0 y1) 2)]
      }))
 
+(defn shape-from-blob
+  [{:keys [type coords x-range y-range mid-pt]}]
+  (let [[min-x max-x] x-range
+        [min-y max-y] y-range]
+    (case type
+      :red-bird {:shape :circle
+                 :radius (:radius (:red bird-attrs))
+                 :pos mid-pt}
+      :blue-bird {:shape :circle
+                  :radius (:radius (:blue bird-attrs))
+                  :pos mid-pt}
+      :pig {:shape :circle
+            :radius (max (- max-x min-x) (- max-y min-y))
+            :pos mid-pt}
+      ;; else
+      (shape-from-coords coords x-range y-range true))))
+
 (defn deepCopyBI
   [^BufferedImage bi]
   (let [cm (.getColorModel bi)
         raster (.copyData bi nil)]
     (BufferedImage. cm raster (.isAlphaPremultiplied cm) nil)))
 
-(defn identify-blobs!
-  []
+(defn identify-blobs
+  [^BufferedImage img]
   (let [id-counter (atom 0)
-        ^BufferedImage img @orig-img
         ^BufferedImage class-img (deepCopyBI img)
         canv (select @the-frame [:#canvas])
         ok-params (dissoc object-params :tap :trajectory :sky
                           :blue-bird :yellow-bird)]
-    (doseq [x (range 0 px-width)
-            y (range 0 px-height)]
-      (.setRGB class-img x y (.getRGB (.darker (.darker (Color. (.getRGB class-img x y)))))))
-    (reset! display-img class-img)
-    (invoke-later (repaint! canv))
-    (doseq [x (range min-x (inc max-x))
-            y (range min-y (inc max-y))
-            :let [cell (get-cell [x y])]
-            :when (nil? (:type @cell))]
-      (let [xy-rgb (r-g-b (.getRGB img x y))]
-        (doseq [[type params] ok-params
-                :let [my-colors (:colors params)
-                      seed-rgb (first my-colors)
-                      tol (:tolerance params)]]
-                (when (color-within-tol? xy-rgb seed-rgb tol)
-                  ;; detected the seed color of this object type
-                  (let [id (swap! id-counter inc)
-                        obj (scan-object! img [x y] id type my-colors tol)
-                        coords (:coords obj)
-                        pxx (count coords)
-                        [min-px max-px] (:size params)
-                        seed-int (rgb-int seed-rgb)]
-                    (if (<= min-px pxx max-px)
-                      (do
-                        (swap! (get objs type) assoc id obj)
-                        (doseq [[x y] coords]
-                          (.setRGB class-img x y seed-int))
+    (when *debug*
+      (doseq [x (range 0 px-width)
+              y (range 0 px-height)]
+        (.setRGB class-img x y (.getRGB (.darker (.darker (Color. (.getRGB class-img x y)))))))
+      (reset! display-img class-img)
+      (invoke-later (repaint! canv)))
+    ;; recursively build up 'blobs'
+    (loop [pts (for [x (range 0 px-width)
+                     y (range 0 px-height)] [x y])
+           blobs []]
+      (if (seq pts)
+        (let [[x y] (first pts)
+              cell (get-cell [x y])]
+          (if (nil? (:type @cell))
+            (let [xy-rgb (r-g-b (.getRGB img x y))
+                  type (detect-type-from-color xy-rgb ok-params)]
+              (if (nil? type)
+                ;; no detected type here, continue
+                (recur (next pts) blobs)
+                ;; detected the seed color of an object
+                (let [my-params (get ok-params type)
+                      my-colors (:colors my-params)
+                      tol (:tolerance my-params)
+                      id (swap! id-counter inc)
+                      blob (scan-blob img [x y] id type my-colors tol)
+                      coords (:coords blob)
+                      pxx (count coords)
+                      [min-px max-px] (:size my-params)]
+                  ;; check within allowed size range
+                  (if (<= min-px pxx max-px)
+                    (do
+                      (when *debug*
+                        (let [seed-int (rgb-int (first my-colors))]
+                          (doseq [[x y] coords]
+                            (.setRGB class-img x y seed-int)))
                         (invoke-later (repaint! canv))
-                        (dbg "object id " id " type " type " was size " pxx
-                             " x-range " (:x-range obj)
-                             " y-range " (:y-range obj)))
-                      ;; otherwise ignore it
-                      nil
-                      ;; reset the cells?
-                                        ;(doseq [[x y] (:coords @obj)]
-                                        ;(reset! (get-cell [x y]) {:id nil :type nil})))
-                      ))))))
-    (reduce + (map #(count @%) (vals objs)))))
+                        (dbg "FOUND" type "(" id "), of" pxx "px. "
+                             "x-range" (:x-range blob)
+                             "y-range" (:y-range blob)))
+                      ;; detect shape, but farm the work off to another thread
+                      (let [well-known-blob (assoc blob
+                                              :geom (future (shape-from-blob blob)))]
+                        (recur (next pts) (conj blobs well-known-blob))))
+                    ;; out of size range, ignore
+                    (recur (next pts) blobs)))))
+            ;; cell already identified, skip
+            (recur (next pts) blobs)))
+        ;; end of points, return:
+        blobs))))
 
-(defn detect-shapes!
-  []
-  (dbg "DETECTING SHAPES")
-  (doseq [type (keys objs)
-          :let [ooatom (get objs type)]]
-    (doseq [[id obj] @ooatom]
-      (dbg "object of type " (:type obj))
-      (let [type (:type obj)
-            geom (shape-from-blob (:coords obj)
-                                  (:x-range obj)
-                                  (:y-range obj)
-                                  true)]
-        (dbg geom)
-        (swap! ooatom assoc-in [id :geom] geom)
-        ;; draw shape for display
-        (let [g (.getGraphics ^BufferedImage @display-img)
-              cc (:coords geom)
-              r (:radius geom)
-              [x y] (:pos geom)
-              sty (style :foreground Color/YELLOW)]
-          (case (:shape geom)
-            :poly (draw g (apply polygon cc) sty)
-            :circle (draw g (circle x y r) sty)
-            nil nil)))))
+(defn draw-shapes!
+  [blobs]
+  (dbg "DRAWING SHAPES")
+  (let [g (.getGraphics ^BufferedImage @display-img)
+        sty (style :foreground Color/YELLOW)]
+    (doseq [blob blobs
+            :let [type (:type blob)
+                  geom @(:geom blob)
+                  cc (:coords geom)
+                  r (:radius geom)
+                  [x y] (:pos geom)]]
+            (dbg geom)
+            (case (:shape geom)
+              :poly (draw g (apply polygon cc) sty)
+              :circle (draw g (circle x y r) sty)
+              nil nil)))
   (repaint! @the-frame))
 
-(defn adjust-shapes!
-  []
+(defn adjust-shapes
+  [blobs]
   (dbg "ADJUSTING SHAPES"))
 
-(defn segment-img!
-  []
-  (identify-blobs!)
+(defn segment-img
+  [img]
   (binding [*debug* true]
-    (detect-shapes!)
-    (adjust-shapes!)))
+    (let [blobs (identify-blobs img)]
+      (when *debug*
+        (draw-shapes! blobs))
+      (let [adj-shapes (adjust-shapes blobs)]
+        adj-shapes))))
 
 (defn paint
   [c g]
@@ -210,7 +237,7 @@
         img (ImageIO/read (File. screenshot))]
     (reset! orig-img img)
     (reset! display-img img)
-    ;(invoke-later
+    ;(when *debug*
      (reset! the-frame
              (-> (frame :title "Hello",
                         :width px-width
@@ -218,11 +245,7 @@
                         :content (border-panel :hgap 5 :vgap 5 :border 5
                                                :center (canvas :id :canvas :background "#BBBBDD"
                                                                :paint paint)
-                                        ; Some buttons
-                                               :south (horizontal-panel :items ["Process the image: "
-                                                                                (action :name "Segment it"
-                                                                                        :handler (fn [_] (segment-img!)))]))
+                                               :south (horizontal-panel :items ["Uglyboids..."]))
                         :on-close :dispose)
-                                        ;pack!
                  show!))
-     (time (segment-img!))))
+     (time (segment-img @orig-img))))

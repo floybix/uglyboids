@@ -221,15 +221,15 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
         ;; convert back to local rectangular coordinates (origin=mid-pt)
         pts (map (fn [{:keys [mag ang]}] (polar-xy mag ang)) pp)
         ;; eliminate points too close to each other, keeping furthest
-        too-close? (map (fn [i [pp0 pp1 pp2] [xy0 xy1 xy2]]
-                          ;; only consider excluding every second point
-                          (and (zero? (mod i 2))
-                               ;; decide whether to omit the middle point p1
-                               (or
-                                (and (< (:mag pp1) (:mag pp0))
-                                     (< (v-dist xy1 xy0) distance-tol))
-                                (and (<= (:mag pp1) (:mag pp2))
-                                     (< (v-dist xy1 xy2) distance-tol)))))
+        too-close? (mapv (fn [i [pp0 pp1 pp2] [xy0 xy1 xy2]]
+                           ;; only consider excluding every second point
+                           (and (= (mod i 2) 1)
+                                ;; decide whether to omit the middle point p1
+                                (or
+                                 (and (< (:mag pp1) (:mag pp0))
+                                      (< (v-dist xy1 xy0) distance-tol))
+                                 (and (<= (:mag pp1) (:mag pp2))
+                                      (< (v-dist xy1 xy2) distance-tol)))))
                         (range (count pp))
                         (triples-wrapped pp)
                         (triples-wrapped pts))
@@ -241,7 +241,7 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
         ;; find index of point with opposite angle
         i-opp (apply max-key
                      (fn [i] (abs (in-pi-pi (- ang0 (:ang (nth pp-s i))))))
-                     (range 1 (- n 1)))
+                     (range 1 n))
         ;i-opp (/ n 2)
         i-perp-a (quot i-opp 2)
         i-perp-b (quot (+ i-opp n) 2)
@@ -314,7 +314,7 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
                      (- (* c c)))
                   (* 2 a b)))))
 
-(defn shape-from-blob
+(defn shape-from-coords
   [coords [min-x max-x] [min-y max-y] convex?]
   (let [edge-pts (edge-points coords [min-x max-x] [min-y max-y])
         mid-pt [(* 0.5 (+ min-x max-x))
