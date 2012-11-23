@@ -9,7 +9,7 @@
           [javax.imageio ImageIO]
           [javax.swing JFrame JPanel]))
 
-(def ^:dynamic *debug* false)
+(def ^:dynamic *debug* true)
 
 (defn dbg [& args]
   (when *debug* (apply println args)))
@@ -20,8 +20,8 @@
 
 (def min-x 0)
 (def max-x 1885)
-(def min-y 120)
-(def max-y 1050)
+(def min-y 200)
+(def max-y 1000)
 
 (def cells (vec (for [y (range 0 px-height)]
                   (vec (for [x (range 0 px-width)]
@@ -127,7 +127,7 @@
                   :radius (:radius (:blue bird-attrs))
                   :pos mid-pt}
       :pig {:shape :circle
-            :radius (max (- max-x min-x) (- max-y min-y))
+            :radius (/ (max (- max-x min-x) (- max-y min-y)) 2)
             :pos mid-pt}
       ;; else
       (shape-from-coords coords x-range y-range true))))
@@ -146,14 +146,14 @@
         ok-params (dissoc object-params :tap :trajectory :sky
                           :blue-bird :yellow-bird)]
     (when *debug*
-      (doseq [x (range 0 px-width)
-              y (range 0 px-height)]
+      (doseq [y (range 0 px-height)
+              x (range 0 px-width)]
         (.setRGB class-img x y (.getRGB (.darker (.darker (Color. (.getRGB class-img x y)))))))
       (reset! display-img class-img)
       (invoke-later (repaint! canv)))
     ;; recursively build up 'blobs'
-    (loop [pts (for [x (range 0 px-width)
-                     y (range 0 px-height)] [x y])
+    (loop [pts (for [y (range 0 px-height)
+                     x (range 0 px-width)] [x y])
            blobs []]
       (if (seq pts)
         (let [[x y] (first pts)
@@ -172,9 +172,13 @@
                       blob (scan-blob img [x y] id type my-colors tol)
                       coords (:coords blob)
                       pxx (count coords)
-                      [min-px max-px] (:size my-params)]
+                      [min-px max-px] (:size my-params)
+                      [x-lo x-hi] (:x-range blob)
+                      [y-lo y-hi] (:y-range blob)]
                   ;; check within allowed size range
-                  (if (<= min-px pxx max-px)
+                  (if (and (<= min-px pxx max-px)
+                           (>= (- x-hi x-lo) 5)
+                           (>= (- y-hi y-lo) 5))
                     (do
                       (when *debug*
                         (let [seed-int (rgb-int (first my-colors))]
@@ -186,7 +190,9 @@
                              "y-range" (:y-range blob)))
                       ;; detect shape, but farm the work off to another thread
                       (let [well-known-blob (assoc blob
-                                              :geom (future (shape-from-blob blob)))]
+                                              :geom (if *debug* ;; concurrency is hard to debug
+                                                      (atom (shape-from-blob blob))
+                                                      (future (shape-from-blob blob))))]
                         (recur (next pts) (conj blobs well-known-blob))))
                     ;; out of size range, ignore
                     (recur (next pts) blobs)))))
@@ -206,9 +212,10 @@
                   cc (:coords geom)
                   r (:radius geom)
                   [x y] (:pos geom)]]
-            (dbg geom)
+            (dbg type geom)
             (case (:shape geom)
-              :poly (draw g (apply polygon cc) sty)
+              :poly (do (draw g (apply polygon cc) sty)
+                        (doseq [[cx cy] cc] (draw g (circle cx cy 2) sty)))
               :circle (draw g (circle x y r) sty)
               nil nil)))
   (repaint! @the-frame))
@@ -219,12 +226,11 @@
 
 (defn segment-img
   [img]
-  (binding [*debug* true]
-    (let [blobs (identify-blobs img)]
-      (when *debug*
-        (draw-shapes! blobs))
-      (let [adj-shapes (adjust-shapes blobs)]
-        adj-shapes))))
+  (let [blobs (identify-blobs img)]
+    (when *debug*
+      (draw-shapes! blobs))
+    (let [adj-shapes (adjust-shapes blobs)]
+      adj-shapes)))
 
 (defn paint
   [c g]
@@ -233,11 +239,12 @@
           (style :background :black))))
 
 (defn -main [& args]
-  (let [screenshot "/home/felix/devel/uglyboids/screenshots/angrybirds_1_2.png"
+  (let [default "/home/felix/devel/uglyboids/screenshots/angrybirds_1_2.png"
+        screenshot (if (seq args) (first args) default)
         img (ImageIO/read (File. screenshot))]
     (reset! orig-img img)
     (reset! display-img img)
-    ;(when *debug*
+    (when *debug*
      (reset! the-frame
              (-> (frame :title "Hello",
                         :width px-width
@@ -247,5 +254,5 @@
                                                                :paint paint)
                                                :south (horizontal-panel :items ["Uglyboids..."]))
                         :on-close :dispose)
-                 show!))
-     (time (segment-img @orig-img))))
+                 show!)))
+    (time (segment-img @orig-img))))

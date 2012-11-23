@@ -173,7 +173,7 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
   "Within +/- 1.5 degrees."
   [ang]
   (let [tol-degrees 1.5]
-    (< (abs (- (abs ang) PI_2))
+    (< (abs (- (abs (in-pi-pi ang)) PI_2))
        (* tol-degrees (/ PI 180.0)))))
 
 (defn horizontal-angle?
@@ -206,100 +206,136 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
           y (+ (* m0 (- x x0)) y0)]
       [x y])))
 
+
+(defn angle-to-gradient
+  [ang]
+  (cond (vertical-angle? ang) nil
+        (horizontal-angle? ang) 0.0
+        :else (Math/tan ang)))
+
+(defn angle-intersection
+  "Point of intersection of two lines in the plane."
+  [xy0 ang0 xy1 ang1]
+  (let [m0 (angle-to-gradient ang0)
+        m1 (angle-to-gradient ang1)]
+    (line-intersection xy0 m0 xy1 m1)))
+
 (defn find-vertices
   [edge-pts mid-pt angle-tol distance-tol convex?]
   (let [n-segments 32
         segx (segment-extrema edge-pts mid-pt n-segments
                               :maxima-only? convex?)
-        ;; collapse to a flat sequence of polar points (from segments)
-        all-pp (apply concat segx)
-        ;; find index of single furthest point (TODO: use reduce?)
-        i0 (apply max-key (fn [i] (:mag (nth all-pp i)))
-                  (range (count all-pp)))
-        ;; start from most distant point as it must be a true vertex
-        pp (concat (drop i0 all-pp) (take i0 all-pp))
-        ;; convert back to local rectangular coordinates (origin=mid-pt)
-        pts (map (fn [{:keys [mag ang]}] (polar-xy mag ang)) pp)
-        ;; eliminate points too close to each other, keeping furthest
-        too-close? (mapv (fn [i [pp0 pp1 pp2] [xy0 xy1 xy2]]
-                           ;; only consider excluding every second point
-                           (and (= (mod i 2) 1)
-                                ;; decide whether to omit the middle point p1
-                                (or
-                                 (and (< (:mag pp1) (:mag pp0))
-                                      (< (v-dist xy1 xy0) distance-tol))
-                                 (and (<= (:mag pp1) (:mag pp2))
-                                      (< (v-dist xy1 xy2) distance-tol)))))
-                        (range (count pp))
-                        (triples-wrapped pp)
-                        (triples-wrapped pts))
-        pp-s (keep-indexed (fn [i x] (when-not (nth too-close? i) x)) pp)
-        pts-s (keep-indexed (fn [i x] (when-not (nth too-close? i) x)) pts)
-        n (count pts-s)
-        ;; check for a long thin shape since it can be assumed a rect.
-        ang0 (:ang (first pp-s))
-        ;; find index of point with opposite angle
-        i-opp (apply max-key
-                     (fn [i] (abs (in-pi-pi (- ang0 (:ang (nth pp-s i))))))
-                     (range 1 n))
-        ;i-opp (/ n 2)
-        i-perp-a (quot i-opp 2)
-        i-perp-b (quot (+ i-opp n) 2)
-        longways (+ (:mag (first pp-s)) (:mag (nth pp-s i-opp)))
-        sideways (+ (:mag (nth pp-s i-perp-a)) (:mag (nth pp-s i-perp-b)))
-        is-strut? (and (<= sideways 24)
-                       (>= (/ longways sideways) 3.1))]
-    (if is-strut?
-      ;; in Angry Birds long sides are always parallel.
-      ;; for struts (long thin rects) assume right angles
-      (let [pts-side-a (drop 2 (drop-last 2 (take i-opp pts-s)))
-            pts-side-b (drop 2 (drop-last 2 (drop i-opp pts-s)))
-            angs-side-a (map (fn [[p1 p2]] (v-angle (v-sub p2 p1)))
-                            (partition 2 1 pts-side-a))
-            angs-side-b (map (fn [[p1 p2]] (v-angle (v-sub p1 p2))) ;; reverse points for other side
-                             (partition 2 1 pts-side-b))
-            angs-all (concat angs-side-a angs-side-b)
-            ;; estimate angle of the long sides (parallel) as median of each pair
-            ;; correct for discontinuity at -pi/+pi
-            angs-all* (if (> (median (map abs angs-all)) (* 0.8 PI))
-                        (map #(if (neg? %) (+ % TWOPI) %) angs-all)
-                        angs-all)
-            long-ang (in-pi-pi (median angs-all*))
-            ;; vertical represented as nil gradient
-            long-grad (cond (vertical-angle? long-ang) nil
-                            (horizontal-angle? long-ang) 0
-                            :else (Math/tan long-ang))
-            perp-grad (cond (nil? long-grad) 0
-                            (zero? long-grad) nil
-                            :else (- (/ long-grad)))
-            med-pt-a (v-avg pts-side-a)
-            med-pt-b (v-avg pts-side-b)
-            far-pt (first pts-s)
-            opp-pt (mapv - far-pt) ;; flip around mid-pt (local coords)
-            ;; start from far-pt and follow original order (increasing angle)
-            vtx [(line-intersection far-pt perp-grad med-pt-a long-grad)
-                 (line-intersection med-pt-a long-grad opp-pt perp-grad)
-                 (line-intersection opp-pt perp-grad med-pt-b long-grad)
-                 (line-intersection med-pt-b long-grad far-pt perp-grad)]]
-        ;; return: convert back to global coordinates
-        (map #(v-add % mid-pt) vtx))
-      ;; otherwise, general shapes
-      ;; eliminate points that are redundant due to collinearity
-      (loop [vtx (vec (take 1 pts-s))
-             more-pts (drop 1 pts-s)]
-        (let [p0 (peek vtx)
-              [p1 p2] (take 2 more-pts)]
-          (if p2
-            (let [too? (and (pos? distance-tol)
-                            (or (< (v-dist p0 p1) distance-tol)
-                                (< (v-dist p1 p2) distance-tol)))
-                  co? (when-not too?
-                        (collinear? p0 p1 p2 angle-tol))
-                  is-vtx? (not (or too? co?))]
-              (recur (if is-vtx? (conj vtx p1) vtx)
-                     (next more-pts)))
+        n-segs-ok (count (filter seq segx))]
+    (when (>= n-segs-ok (quot n-segments 2))
+      (let [;; collapse to a flat sequence of polar points (from segments)
+            all-pp (apply concat segx)
+            ;; find index of single furthest point (TODO: use reduce?)
+            i0 (apply max-key (fn [i] (:mag (nth all-pp i)))
+                      (range (count all-pp)))
+            ;; start from most distant point as it must be a true vertex
+            pp (concat (drop i0 all-pp) (take i0 all-pp))
+            ;; convert back to local rectangular coordinates (origin=mid-pt)
+            pts (map (fn [{:keys [mag ang]}] (polar-xy mag ang)) pp)
+            ;; eliminate points too close to each other, keeping furthest
+            too-close? (mapv (fn [i [xy0 xy1 xy2]]
+                               ;; decide whether to omit the middle point xy1
+                               ;; only consider excluding every second point
+                               (and (= (mod i 2) 1)
+                                    (or
+                                     (< (v-dist xy1 xy0) distance-tol)
+                                     (< (v-dist xy1 xy2) distance-tol))))
+                             (range (count pts))
+                             (triples-wrapped pts))
+            pp-s (keep-indexed (fn [i x] (when-not (nth too-close? i) x)) pp)
+            pts-s (keep-indexed (fn [i x] (when-not (nth too-close? i) x)) pts)
+                                        ;pp-s (if convex? pp pp-s)
+                                        ;pts-s (if convex? pts pts-s)
+            n (count pts-s)
+            ;; check for a long thin shape since it can be assumed a rect.
+            ang0 (:ang (first pp-s))
+            ;; find index of point with opposite angle
+            i-opp (apply max-key
+                         (fn [i] (abs (in-pi-pi (- ang0 (:ang (nth pp-s i))))))
+                         (range 3 (- n 2)))
+                                        ;i-opp (/ n 2)
+            i-perp-a (quot i-opp 2)
+            i-perp-b (quot (+ i-opp n) 2)
+            longways (+ (:mag (first pp-s)) (:mag (nth pp-s i-opp)))
+            sideways (+ (:mag (nth pp-s i-perp-a)) (:mag (nth pp-s i-perp-b)))
+            is-strut? (and (>= longways 42)
+                           (<= sideways 42)
+                           (>= (/ longways sideways) 3.1))]
+        (if is-strut?
+          ;; in Angry Birds long sides are always parallel.
+          ;; for struts (long thin rects) assume right angles
+          (let [pad-a (if (>= i-opp 6) 2 1)
+                pad-b (if (>= (- n i-opp) 6) 2 1)
+                pts-side-a (drop pad-a (drop-last pad-a (take i-opp pts-s)))
+                pts-side-b (drop pad-b (drop-last pad-b (drop i-opp pts-s)))
+                angs-side-a (map (fn [[p1 p2]] (v-angle (v-sub p2 p1)))
+                                 (partition 2 1 pts-side-a))
+                angs-side-b (map (fn [[p1 p2]] (v-angle (v-sub p1 p2))) ;; reverse points for other side
+                                 (partition 2 1 pts-side-b))
+                angs-all (concat angs-side-a angs-side-b)
+                ;; estimate angle of the long sides (parallel) as median of each pair
+                ;; correct for discontinuity at -pi/+pi
+                angs-all* (if (> (median (map abs angs-all)) (* 0.8 PI))
+                            (map #(if (neg? %) (+ % TWOPI) %) angs-all)
+                            angs-all)
+                long-ang (in-pi-pi (median angs-all*))
+                ;; vertical represented as nil gradient
+                long-grad (angle-to-gradient long-ang)
+                perp-grad (angle-to-gradient (+ long-ang PI_2))
+                ;_ (swank.core/break)
+                med-pt-a (v-avg pts-side-a)
+                med-pt-b (v-avg pts-side-b)
+                far-pt (first pts-s)
+                opp-pt (mapv - far-pt) ;; flip around mid-pt (local coords)
+                ;; start from far-pt and follow original order (increasing angle)
+                vtx [(line-intersection far-pt perp-grad med-pt-a long-grad)
+                     (line-intersection med-pt-a long-grad opp-pt perp-grad)
+                     (line-intersection opp-pt perp-grad med-pt-b long-grad)
+                     (line-intersection med-pt-b long-grad far-pt perp-grad)]]
             ;; return: convert back to global coordinates
-            (map #(v-add % mid-pt) vtx)))))))
+            (map #(v-add % mid-pt) vtx))
+          ;; otherwise, general shapes
+                                        ;(map #(v-add % mid-pt) pts-s))))
+          ;; eliminate points that are redundant due to collinearity
+          (loop [lines []
+                 more-pts (concat pts-s (take 1 pts-s))
+                 cur-angle (v-angle (v-sub (second pts-s) (first pts-s)))
+                 cur-anchor (first pts-s)]
+            (let [[p0 p1 p2] (take 3 more-pts)]
+              (if p2
+                (if (collinear? p0 p1 p2 angle-tol)
+                  (recur lines
+                         (next more-pts)
+                         (v-angle (v-sub p1 p0))
+                         p1)
+                  ;; not collinear, so is a vertex: store the line up to here
+                  (recur (conj lines {:ang cur-angle :pt cur-anchor})
+                         (next more-pts)
+                         (v-angle (v-sub p2 p1))
+                         (v-avg [p1 p2])))
+                ;; return: find vertices as intersections of lines
+                (loop [vtx []
+                       lines (concat lines (take 1 lines))]
+                  (let [[line0 line1] (take 2 lines)]
+                                        ;(swank.core/break)
+                    (println line0 line1)
+                    (if line1
+                      (let [ang-diff (- (:ang line1) (:ang line0))
+                            bad-spike? (horizontal-angle? ang-diff)
+                            new-vtx (if bad-spike? (:pt line1)
+                                        (angle-intersection (:pt line0)
+                                                            (:ang line0)
+                                                            (:pt line1)
+                                                            (:ang line1)))]
+                        (recur (conj vtx new-vtx)
+                               (next lines)))
+                      ;; return: convert back to global coordinates
+                      (map #(v-add % mid-pt) vtx))))))))))))
+
 
 (defn interior-angle
   "Interior angle of a triple of points using law of cosines:

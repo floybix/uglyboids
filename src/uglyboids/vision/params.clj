@@ -54,7 +54,7 @@
                           [51,110,21]   ; green
                           [82,153,11]   ; green
                           [194,254,13]) ; green
-            :tolerance -10
+            :tolerance 10
             :size [200 1e7]}
    :trajectory {:colors (list [255,255,255]
                               [239,239,239])
@@ -81,7 +81,7 @@
                          [148,218,250]
                          [130,209,248])
                          ;[231,247,254]) ; ice-white shine, same as sky
-           :tolerance 15
+           :tolerance 17
            :size [20 5000]}
    :stone {:colors (list [160,160,160]
                          [130,130,130]

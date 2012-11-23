@@ -1,4 +1,6 @@
 
+* use collinear trick on general polygons too
+* backup
 * split up static-surface blobs to better define polygons
   * if width > 200px split horiz.
   * get segment minima for upward angles only (otherwise grass interferes)
