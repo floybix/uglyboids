@@ -55,14 +55,34 @@
   [v1 v2]
   (v-mag (v-sub v1 v2)))
 
+(defn neighbours
+  [[x y] [min-x max-x] [min-y max-y]]
+;  (for [xi [(dec x) x (inc x)]
+;        yi [(dec y) y (inc y)]
+;        :when (and (<= min-x xi max-x)
+;                   (<= min-y yi max-y)
+;                   (not= [x y] [xi yi]))]
+;    [xi yi]))
+  (filter (fn [[x y]] (and (<= min-x x max-x)
+                           (<= min-y y max-y)))
+          (list [(inc x) y]
+                [x (inc y)]
+                [(dec x) y]
+                [x (dec y)])))
+
+(defn dilate-blob
+  [coords [min-x max-x] [min-y max-y]]
+  (into (set coords)
+        (mapcat #(neighbours % [min-x max-x] [min-y max-y]) coords)))
 
 (defn edge-points
   "Return the set of points which are on the edge of a shape:
 specifically the left-/right-most or top-/bottom-most points on each
 horizontal or vertical coordinate."
-  [coords [min-x max-x] [min-y max-y]]
-  (let [rng-x (inc (- max-x min-x))
-        rng-y (inc (- max-y min-y))
+  [coords [x-lo x-hi] [y-lo y-hi] ground-level]
+  (let [gl-ok (min y-hi (max y-lo ground-level))
+        rng-x (inc (- x-hi x-lo))
+        rng-y (inc (- y-hi y-lo))
         min-ok (fn [a b] (if (nil? a) b (min a b)))
         max-ok (fn [a b] (if (nil? a) b (max a b)))]
     (loop [pts coords
@@ -72,16 +92,19 @@ horizontal or vertical coordinate."
            top-ys (vec (repeat rng-x nil))]
       (if (seq pts)
         (let [[x y] (first pts)
-              iy (- y min-y)
-              ix (- x min-x)]
+              iy (- y y-lo)
+              ix (- x x-lo)
+              ;; drop bottom edge to ground level
+              yb (if (< (abs (- y ground-level)) 16)
+                   gl-ok y)]
           (recur (next pts)
                  (update-in left-xs [iy] min-ok x)
                  (update-in right-xs [iy] max-ok x)
                  (update-in bot-ys [ix] min-ok y)
-                 (update-in top-ys [ix] max-ok y)))
+                 (update-in top-ys [ix] max-ok yb))) ;; since y increases "down"; TODO: this sucks
         ;; merge sets of points
-        (let [to-points-lr (fn [i x] [x (+ i min-y)])
-              to-points-tb (fn [i y] [(+ i min-x) y])
+        (let [to-points-lr (fn [i x] [x (+ i y-lo)])
+              to-points-tb (fn [i y] [(+ i x-lo) y])
               point-sets [(set (map-indexed to-points-lr left-xs))
                           (set (map-indexed to-points-lr right-xs))
                           (set (map-indexed to-points-tb bot-ys))
@@ -188,24 +211,24 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
    Gradient can be passed as nil for vertical lines."
   [[x0 y0] m0 [x1 y1] m1]
   (cond
+   (= m0 m1) nil
    ;; vertical line at x = x0
-    (nil? m0)
-    (let [y (+ (* m1 (- x0 x1)) y1)]
-      [x0 y])
-    ;; vertical line at x = x1
-    (nil? m1)
-    (let [y (+ (* m0 (- x1 x0)) y0)]
-      [x1 y])
-    ;; general equation
-    ;; x = (m0.x0 + y0 - y1) /
-    ;;      (m1 - m0)
-    ;; y = m0 (x - x0) + y0
-    :else
-    (let [x (/ (+ (* m0 x0) y0 (- y1))
-               (- m1 m0))
-          y (+ (* m0 (- x x0)) y0)]
-      [x y])))
-
+   (nil? m0)
+   (let [y (+ (* m1 (- x0 x1)) y1)]
+     [x0 y])
+   ;; vertical line at x = x1
+   (nil? m1)
+   (let [y (+ (* m0 (- x1 x0)) y0)]
+     [x1 y])
+   ;; general equation
+   ;; x = m0.x0 - m1.x1 + y1 - y0
+   ;;     (m0 - m1)
+   ;; y = m0 (x - x0) + y0
+   :else
+   (let [x (/ (+ (* m0 x0) (* -1 m1 x1) y1 (- y0))
+              (- m0 m1))
+         y (+ (* m0 (- x x0)) y0)]
+     [x y])))
 
 (defn angle-to-gradient
   [ang]
@@ -221,11 +244,13 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
     (line-intersection xy0 m0 xy1 m1)))
 
 (defn find-vertices
-  [edge-pts mid-pt angle-tol distance-tol convex?]
+  [edge-pts convex? mid-pt [x-lo x-hi] [y-lo y-hi] angle-tol distance-tol ]
   (let [n-segments 32
         segx (segment-extrema edge-pts mid-pt n-segments
                               :maxima-only? convex?)
-        n-segs-ok (count (filter seq segx))]
+        n-segs-ok (count (filter seq segx))
+        [lx-lo lx-hi] (v-sub [x-lo x-hi] mid-pt)
+        [ly-lo ly-hi] (v-sub [y-lo y-hi] mid-pt)]
     (when (>= n-segs-ok (quot n-segments 2))
       (let [;; collapse to a flat sequence of polar points (from segments)
             all-pp (apply concat segx)
@@ -258,13 +283,13 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
                          (fn [i] (abs (in-pi-pi (- ang0 (:ang (nth pp-s i))))))
                          (range 3 (- n 2)))
                                         ;i-opp (/ n 2)
-            i-perp-a (quot i-opp 2)
-            i-perp-b (quot (+ i-opp n) 2)
+            i-perp-a (/ i-opp 2)
+            i-perp-b (/ (+ i-opp n) 2)
             longways (+ (:mag (first pp-s)) (:mag (nth pp-s i-opp)))
             sideways (+ (:mag (nth pp-s i-perp-a)) (:mag (nth pp-s i-perp-b)))
-            is-strut? (and (>= longways 42)
-                           (<= sideways 42)
-                           (>= (/ longways sideways) 3.1))]
+            is-strut? (and (>= longways 24)
+                           (<= sideways 120)
+                           (>= (/ longways sideways) 3.5))]
         (if is-strut?
           ;; in Angry Birds long sides are always parallel.
           ;; for struts (long thin rects) assume right angles
@@ -273,7 +298,7 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
                 pts-side-a (drop pad-a (drop-last pad-a (take i-opp pts-s)))
                 pts-side-b (drop pad-b (drop-last pad-b (drop i-opp pts-s)))
                 angs-side-a (map (fn [[p1 p2]] (v-angle (v-sub p2 p1)))
-                                 (partition 2 1 pts-side-a))
+                                 (partition 2 1 pts-side-b))
                 angs-side-b (map (fn [[p1 p2]] (v-angle (v-sub p1 p2))) ;; reverse points for other side
                                  (partition 2 1 pts-side-b))
                 angs-all (concat angs-side-a angs-side-b)
@@ -283,10 +308,8 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
                             (map #(if (neg? %) (+ % TWOPI) %) angs-all)
                             angs-all)
                 long-ang (in-pi-pi (median angs-all*))
-                ;; vertical represented as nil gradient
                 long-grad (angle-to-gradient long-ang)
                 perp-grad (angle-to-gradient (+ long-ang PI_2))
-                ;_ (swank.core/break)
                 med-pt-a (v-avg pts-side-a)
                 med-pt-b (v-avg pts-side-b)
                 far-pt (first pts-s)
@@ -299,43 +322,87 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
             ;; return: convert back to global coordinates
             (map #(v-add % mid-pt) vtx))
           ;; otherwise, general shapes
-                                        ;(map #(v-add % mid-pt) pts-s))))
-          ;; eliminate points that are redundant due to collinearity
+;          (map #(v-add % mid-pt) pts-s))))))
+          ;; detect edges via collinear points
           (loop [lines []
-                 more-pts (concat pts-s (take 1 pts-s))
-                 cur-angle (v-angle (v-sub (second pts-s) (first pts-s)))
-                 cur-anchor (first pts-s)]
+                 vtx []
+                 more-pts (concat pts-s (take 3 pts-s))
+                 prev-line nil
+                 prev-end-pt (first pts-s)
+                 cur-added? false]
             (let [[p0 p1 p2] (take 3 more-pts)]
+              (println (count lines) "lines," (count vtx) "vtx,"
+                       {:p2 p2
+                        :coll? (if p2 (collinear? p0 p1 p2 angle-tol))
+                        :added? cur-added? :end-pt prev-end-pt})
               (if p2
                 (if (collinear? p0 p1 p2 angle-tol)
-                  (recur lines
+                  (if cur-added?
+                    (recur lines vtx (next more-pts)
+                           prev-line p2 true)
+                    ;; add line implied by collinear points.
+                    (let [new-line {:ang (v-angle (v-sub p2 p1)) :pt p1}]
+                      (println "new-line" new-line)
+                      (if (nil? prev-line)
+                        (recur (conj lines new-line)
+                               vtx
+                               (next more-pts)
+                               new-line p2 true)
+                        ;; we have a previous line, so find intersection vertex
+                        ;; returns nil when lines are parallel
+                        (if-let [new-vtx (angle-intersection (:pt prev-line)
+                                                             (:ang prev-line)
+                                                             (:pt new-line)
+                                                             (:ang new-line))]
+                          ;; check vertex is within bounding box!
+                          (let [[vx vy] new-vtx
+                                fix-vtx [(max lx-lo (min lx-hi vx))
+                                         (max ly-lo (min ly-hi vy))]
+                                badness (if (= new-vtx fix-vtx) 0 (v-dist new-vtx fix-vtx))]
+                            (println {:badness badness :new-vtx new-vtx :fix-vtx fix-vtx})
+                            (if (<= badness 5)
+                              (recur (conj lines new-line)
+                                     (conj vtx fix-vtx)
+                                     (next more-pts)
+                                     new-line p2 true)
+                              ;; badly out of bounding box, ignore this line.
+                              (recur lines vtx
+                                     (next more-pts)
+                                     prev-line prev-end-pt cur-added?)))
+                              ;; check that it will not truncate under prev-end-pt
+                          ;; i.e check that new-vtx is further along direction of (:ang prev-line)
+;                          (let [delta-angle (if (= new-vtx prev-end-pt)
+;                                              (:ang prev-line)
+;                                              (v-angle (v-sub new-vtx prev-end-pt)))
+;                                angle-along-line (- delta-angle (:ang prev-line))
+;                                new-forward? (< (abs angle-along-line) 0.1)]
+;                            (if true ;new-forward?
+;                              (recur (conj lines new-line)
+;                                     (conj vtx new-vtx)
+;                                     (next more-pts)
+;                                     new-line p2 true)
+;                              ;; truncation, implies bad line angle.
+;                              ;; but we don't know which line is bad.
+;                              ;; just join the points...
+;;                              (recur (conj lines {:pt p1
+;;                                                :ang (v-angle (v-sub p1 prev-end-pt))})
+;;                                   (conj vtx prev-end-pt)
+;;                                   (next more-pts)
+;;                                   new-line p2 false))))))
+;                              ;; no, ignore this line
+;                              (recur lines vtx
+;                                     (next more-pts)
+;                                     prev-line prev-end-pt cur-added?)))
+                          ;; parallel with prev line, so skip it (extending end pt)
+                          (recur lines vtx
+                                 (next more-pts)
+                                 prev-line p2 cur-added?)))))
+                  ;; not collinear
+                  (recur lines vtx
                          (next more-pts)
-                         (v-angle (v-sub p1 p0))
-                         p1)
-                  ;; not collinear, so is a vertex: store the line up to here
-                  (recur (conj lines {:ang cur-angle :pt cur-anchor})
-                         (next more-pts)
-                         (v-angle (v-sub p2 p1))
-                         (v-avg [p1 p2])))
-                ;; return: find vertices as intersections of lines
-                (loop [vtx []
-                       lines (concat lines (take 1 lines))]
-                  (let [[line0 line1] (take 2 lines)]
-                                        ;(swank.core/break)
-                    (println line0 line1)
-                    (if line1
-                      (let [ang-diff (- (:ang line1) (:ang line0))
-                            bad-spike? (horizontal-angle? ang-diff)
-                            new-vtx (if bad-spike? (:pt line1)
-                                        (angle-intersection (:pt line0)
-                                                            (:ang line0)
-                                                            (:pt line1)
-                                                            (:ang line1)))]
-                        (recur (conj vtx new-vtx)
-                               (next lines)))
-                      ;; return: convert back to global coordinates
-                      (map #(v-add % mid-pt) vtx))))))))))))
-
+                         prev-line prev-end-pt false))
+                ;; return: convert back to global coordinates
+                (map #(v-add % mid-pt) vtx)))))))))
 
 (defn interior-angle
   "Interior angle of a triple of points using law of cosines:
@@ -351,14 +418,15 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
                   (* 2 a b)))))
 
 (defn shape-from-coords
-  [coords [min-x max-x] [min-y max-y] convex?]
-  (let [edge-pts (edge-points coords [min-x max-x] [min-y max-y])
-        mid-pt [(* 0.5 (+ min-x max-x))
-                (* 0.5 (+ min-y max-y))]
-        angle-tol (/ PI 8)
+  [coords convex? [x-lo x-hi] [y-lo y-hi] ground-level]
+  (let [edge-pts (edge-points coords [x-lo x-hi] [y-lo y-hi] ground-level)
+        mid-pt [(* 0.5 (+ x-lo x-hi))
+                (* 0.5 (+ y-lo y-hi))]
+        angle-tol (/ PI 12)
         distance-tol 6
-        vtx (find-vertices edge-pts mid-pt
-                           angle-tol distance-tol convex?)
+        vtx (find-vertices edge-pts convex? mid-pt
+                           [x-lo x-hi] [y-lo y-hi]
+                           angle-tol distance-tol)
         n-vtx (count vtx)
         int-angles (map interior-angle (triples-wrapped vtx))
         int-degrees (map #(* 180 (/ % PI)) int-angles)]
@@ -378,11 +446,18 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
                     :length length
                     :width width
                     :angles int-degrees})
-     ;; if all vertices are same distance from mid-pt then circle.
+     ;; more complex shape
      (>= n-vtx 5) (let [dists (map #(v-dist % mid-pt) vtx)
                         r-max (apply max dists)
-                        r-min (apply min dists)]
-                    (if (< (- r-max r-min) 16)
+                        r-min (apply min dists)
+                        xs (map first vtx)
+                        ys (map second vtx)
+                        [x-lo x-hi] [(apply min xs) (apply max xs)]
+                        [y-lo y-hi] [(apply min ys) (apply max ys)]]
+                    ;; if all are same distance from mid-pt and squarish then circle
+                    (if (and (<= (- r-max r-min) 6)
+                             (<= (abs (- (- x-hi x-lo)
+                                        (- y-hi y-lo))) 6))
                       {:shape :circle
                        :radius r-max
                        :pos mid-pt}

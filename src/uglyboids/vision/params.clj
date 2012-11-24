@@ -93,13 +93,13 @@
                                [166,112,53]
                                [48,23,8])
                  :tolerance 24
-                 :size [20 5000]}
+                 :size [90 5000]}
    :static-surface {:colors (list [52 34 19]
                                   [65 42 24]
                                   [126 92 66]
                                   [162 122 91])
                     :tolerance 28
-                    :size [90 1e9]}
+                    :size [100 1e9]}
    :blue-bird {:colors (list [99,170,197]
                              [255,174,0])
                :tolerance 20

@@ -20,8 +20,10 @@
 
 (def min-x 0)
 (def max-x 1885)
-(def min-y 200)
+(def min-y 280)
 (def max-y 1000)
+
+(def ground-level (atom max-y))
 
 (def cells (vec (for [y (range 0 px-height)]
                   (vec (for [x (range 0 px-width)]
@@ -105,6 +107,7 @@
                (let [cell (get-cell [x y])]
                  (swap! cell assoc :id id :type type)))
         coords (scanline x y test mark [min-x max-x] [min-y max-y])
+        coords (dilate-blob coords [min-x max-x] [min-y max-y])
         [[x0 y0] [x1 y1]] (bounding-box coords)]
     {:type type
      :id id
@@ -115,11 +118,45 @@
               (quot (+ y0 y1) 2)]
      }))
 
+(defn static-shapes-from-coords
+  "Returns a list of shapes, to be treated as static polylines."
+  [coords [x-lo x-hi] [y-lo y-hi]]
+  ;; check if mid-pt is actually within the blob.
+  ;; if not then we will need to split it up.
+  ;; note static shape can be split up arbitrarily, built as polyline
+  (let [x-mid (quot (+ x-lo x-hi) 2)
+        y-mid (quot (+ y-lo y-hi) 2)
+        mid-inside? (some #(= % [x-mid y-mid]) coords)
+        x-span (- x-hi x-lo)
+        y-span (- y-hi y-lo)]
+    (if (or mid-inside?
+            (< (max x-span y-span) 120))
+      (list (shape-from-coords coords false [x-lo x-hi] [y-lo y-hi] @ground-level))
+      ;; split it up
+      (let [split-fn (if (>= x-span y-span)
+                       #(> (first %) x-mid)
+                       #(> (second %) y-mid))
+            cc-split (group-by split-fn coords)]
+        (mapcat (fn [[_ cc]]
+                  (let [[[x0 y0] [x1 y1]] (bounding-box cc)]
+                    (dbg "SPLIT poly from" [x-lo x-hi] [y-lo y-hi] "at mid-pt" [x-mid y-mid]
+                         "into" [x0 x1] [y0 y1])
+                    (static-shapes-from-coords cc [x0 x1] [y0 y1])))
+                cc-split)))))
+
 (defn shape-from-blob
   [{:keys [type coords x-range y-range mid-pt]}]
-  (let [[min-x max-x] x-range
-        [min-y max-y] y-range]
+  (let [[x-lo x-hi] x-range
+        [y-lo y-hi] y-range]
     (case type
+      :ground (do
+                ;; update ground level, used for other objects
+                (swap! ground-level min y-lo)
+                {:shape :poly
+                 :coords (list [x-hi y-lo]
+                               [x-lo y-lo]
+                               [x-lo y-hi]
+                               [x-hi y-hi])})
       :red-bird {:shape :circle
                  :radius (:radius (:red bird-attrs))
                  :pos mid-pt}
@@ -127,10 +164,13 @@
                   :radius (:radius (:blue bird-attrs))
                   :pos mid-pt}
       :pig {:shape :circle
-            :radius (/ (max (- max-x min-x) (- max-y min-y)) 2)
+            :radius (quot (max (- x-hi x-lo) (- y-hi y-lo)) 2)
             :pos mid-pt}
-      ;; else
-      (shape-from-coords coords x-range y-range true))))
+      :static-surface (static-shapes-from-coords coords x-range y-range)
+      :static-wood (shape-from-coords coords true x-range y-range @ground-level)
+      ;; else - dynamic blocks
+      ;; do not drop edges to ground level
+      (shape-from-coords coords true x-range y-range max-y))))
 
 (defn deepCopyBI
   [^BufferedImage bi]
@@ -152,8 +192,8 @@
       (reset! display-img class-img)
       (invoke-later (repaint! canv)))
     ;; recursively build up 'blobs'
-    (loop [pts (for [y (range 0 px-height)
-                     x (range 0 px-width)] [x y])
+    (loop [pts (for [y (range px-height 0 -1)
+                     x (range 0 px-width)] [x (dec y)])
            blobs []]
       (if (seq pts)
         (let [[x y] (first pts)
@@ -208,25 +248,29 @@
         sty (style :foreground Color/YELLOW)]
     (doseq [blob blobs
             :let [type (:type blob)
-                  geom @(:geom blob)
-                  cc (:coords geom)
-                  r (:radius geom)
-                  [x y] (:pos geom)]]
-            (dbg type geom)
-            (case (:shape geom)
-              :poly (do (draw g (apply polygon cc) sty)
-                        (doseq [[cx cy] cc] (draw g (circle cx cy 2) sty)))
-              :circle (draw g (circle x y r) sty)
-              nil nil)))
-  (repaint! @the-frame))
+                  geoms (flatten (list @(:geom blob)))]]
+      (doseq [geom geoms
+              :let [cc (:coords geom)
+                    r (:radius geom)
+                    [x y] (:pos geom)]]
+        (dbg type geom)
+        (case (:shape geom)
+          :poly (do (draw g (apply polygon cc) sty)
+                    (doseq [[cx cy] cc] (draw g (circle cx cy 2) sty)))
+          :circle (draw g (circle x y r) sty)
+          nil nil)))
+    (repaint! @the-frame)))
 
 (defn adjust-shapes
   [blobs]
   (dbg "ADJUSTING SHAPES"))
 
+(def -blobs (atom nil))
+
 (defn segment-img
   [img]
   (let [blobs (identify-blobs img)]
+    (reset! -blobs blobs)
     (when *debug*
       (draw-shapes! blobs))
     (let [adj-shapes (adjust-shapes blobs)]
