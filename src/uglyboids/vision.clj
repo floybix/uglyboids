@@ -121,17 +121,15 @@
 (defn static-shapes-from-coords
   "Returns a list of shapes, to be treated as static polylines."
   [coords [x-lo x-hi] [y-lo y-hi]]
-  ;; check if mid-pt is actually within the blob.
-  ;; if not then we will need to split it up.
   ;; note static shape can be split up arbitrarily, built as polyline
   (let [x-mid (quot (+ x-lo x-hi) 2)
         y-mid (quot (+ y-lo y-hi) 2)
-        mid-inside? (some #(= % [x-mid y-mid]) coords)
         x-span (- x-hi x-lo)
-        y-span (- y-hi y-lo)]
-    (if (or mid-inside?
-            (< (max x-span y-span) 120))
-      (list (shape-from-coords coords false [x-lo x-hi] [y-lo y-hi] @ground-level))
+        y-span (- y-hi y-lo)
+        max-span (max x-span y-span)]
+    ;; always split if one dimension exceeds 160px.
+    ;; TODO: split on discontinuities in the shape!
+    (if (>= max-span 80)
       ;; split it up
       (let [split-fn (if (>= x-span y-span)
                        #(> (first %) x-mid)
@@ -142,7 +140,9 @@
                     (dbg "SPLIT poly from" [x-lo x-hi] [y-lo y-hi] "at mid-pt" [x-mid y-mid]
                          "into" [x0 x1] [y0 y1])
                     (static-shapes-from-coords cc [x0 x1] [y0 y1])))
-                cc-split)))))
+                cc-split))
+      ;; no need to split, proceed with shape
+      (list (shape-from-coords coords false [x-lo x-hi] [y-lo y-hi] @ground-level)))))
 
 (defn shape-from-blob
   [{:keys [type coords x-range y-range mid-pt]}]
@@ -229,11 +229,11 @@
                              "x-range" (:x-range blob)
                              "y-range" (:y-range blob)))
                       ;; detect shape, but farm the work off to another thread
-                      (let [well-known-blob (assoc blob
-                                              :geom (if *debug* ;; concurrency is hard to debug
-                                                      (atom (shape-from-blob blob))
-                                                      (future (shape-from-blob blob))))]
-                        (recur (next pts) (conj blobs well-known-blob))))
+                      (let [augmented-blob (assoc blob
+                                             :geom (if *debug* ;; concurrency is hard to debug
+                                                     (atom (shape-from-blob blob))
+                                                     (future (shape-from-blob blob))))]
+                        (recur (next pts) (conj blobs augmented-blob))))
                     ;; out of size range, ignore
                     (recur (next pts) blobs)))))
             ;; cell already identified, skip

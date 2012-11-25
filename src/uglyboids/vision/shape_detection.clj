@@ -95,7 +95,7 @@ horizontal or vertical coordinate."
               iy (- y y-lo)
               ix (- x x-lo)
               ;; drop bottom edge to ground level
-              yb (if (< (abs (- y ground-level)) 16)
+              yb (if (< (abs (- y ground-level)) 25)
                    gl-ok y)]
           (recur (next pts)
                  (update-in left-xs [iy] min-ok x)
@@ -113,12 +113,12 @@ horizontal or vertical coordinate."
           (clojure.set/select #(not-any? nil? %) points))))))
 
 (defn segment-extrema
-  "Finds the nearest and furthest points from the mid-point in each
+  "Finds the nearest and furthest points from a center point in each
    angle segment. Returns a vector of length n-segments, each with 0
    to 2 points (0 points if no points were found in that angle
    segment) in local polar coordinates as {:mag :ang}.
    Ordered by angle, from -pi to pi."
-  [edge-pts mid-pt n-segments
+  [edge-pts cent-pt n-segments
    & {:keys [maxima-only?] :or {maxima-only? false}}]
   (let [seg-ang (/ TWOPI n-segments)]
     (loop [pts (seq edge-pts)
@@ -126,7 +126,7 @@ horizontal or vertical coordinate."
                                     {:far nil :near nil}))]
       (if (seq pts)
         (let [pt (first pts)
-              dxy (v-sub pt mid-pt)
+              dxy (v-sub pt cent-pt)
               ang (v-angle dxy)
               mag2 (v-mag2 dxy) ;; distance squared
               pt-polar {:mag mag2 :ang ang}
@@ -136,8 +136,9 @@ horizontal or vertical coordinate."
                             (fn [{:keys [far near]}]
                               (let [is-far? (or (nil? far)
                                                 (> mag2 (:mag far)))
-                                    is-near? (or (nil? near)
-                                                 (< mag2 (:mag near)))]
+                                    is-near? (and (> mag2 4) ;; ignore within 2px
+                                                  (or (nil? near)
+                                                      (< mag2 (:mag near))))]
                                 {:far (if is-far? pt-polar far)
                                  :near (if is-near? pt-polar near)})))))
         ;; return from loop:
@@ -194,15 +195,30 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
 
 (defn vertical-angle?
   "Within +/- 1.5 degrees."
-  [ang]
-  (let [tol-degrees 1.5]
-    (< (abs (- (abs (in-pi-pi ang)) PI_2))
-       (* tol-degrees (/ PI 180.0)))))
+  ([ang]
+     (vertical-angle? ang (* 1.5 (/ PI 180.0))))
+  ([ang tol]
+     (< (abs (- (abs (in-pi-pi ang)) PI_2)) tol)))
 
 (defn horizontal-angle?
   "Within +/- 1.5 degrees."
-  [ang]
-  (vertical-angle? (in-pi-pi (+ ang PI_2))))
+  ([ang]
+     (vertical-angle? (in-pi-pi (+ ang PI_2))))
+  ([ang tol]
+     (vertical-angle? (in-pi-pi (+ ang PI_2)) tol)))
+
+(defn interior-angle
+  "Interior angle of a triple of points using law of cosines:
+     cosC = (a^2 + b^2 - c^2) / (2ab)
+   where, in a triangle, angle C is opposite side c."
+  [[v0 v1 v2]]
+  (let [a (v-dist v0 v1)
+        b (v-dist v2 v1)
+        c (v-dist v0 v2)]
+    (Math/acos (/ (+ (* a a)
+                     (* b b)
+                     (- (* c c)))
+                  (* 2 a b)))))
 
 (defn line-intersection
   "Point of intersection of two lines in the plane.
@@ -243,224 +259,200 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
         m1 (angle-to-gradient ang1)]
     (line-intersection xy0 m0 xy1 m1)))
 
-(defn find-vertices
-  [edge-pts convex? mid-pt [x-lo x-hi] [y-lo y-hi] angle-tol distance-tol ]
-  (let [n-segments 32
-        segx (segment-extrema edge-pts mid-pt n-segments
-                              :maxima-only? convex?)
-        n-segs-ok (count (filter seq segx))
-        [lx-lo lx-hi] (v-sub [x-lo x-hi] mid-pt)
-        [ly-lo ly-hi] (v-sub [y-lo y-hi] mid-pt)]
-    (when (>= n-segs-ok (quot n-segments 2))
+(defn find-vertices-tri-quad
+  [edge-pts cent-pt]
+  (let [n-segments 24
+        angle-tol (/ PI 9) ;; 20 degrees
+        segx (segment-extrema edge-pts cent-pt n-segments
+                              :maxima-only? true)
+        n-segs-ok (count (filter seq segx))]
+    (if (<= n-segs-ok (quot n-segments 2))
+      ;; should not happen, but return:
+      nil
       (let [;; collapse to a flat sequence of polar points (from segments)
             all-pp (apply concat segx)
+            ;; find index of single closest point (TODO: use reduce?)
+            i0 (apply min-key (fn [i] (:mag (nth all-pp i)))
+                      (range (count all-pp)))
+            ;; start from closest point, for orientation
+            pp (concat (drop i0 all-pp) (take i0 all-pp))
+            ;; convert back to local rectangular coordinates (cent)
+            pts (map (fn [{:keys [mag ang]}] (polar-xy mag ang)) pp)
+            n (count pts)
+            ;; find index of point in opposite direction
+            near-dir (:ang (first pp))
+            i-opp (apply max-key
+                         (fn [i] (abs (in-pi-pi (- near-dir (:ang (nth pp i))))))
+                         (range 3 (- n 2)))
+            ;; find angles between pairs of points, skipping over one
+            angs-skip1 (map (fn [[p0 p1 p2]] (v-angle (v-sub p2 p0)))
+                            (triples-wrapped pts))
+            ;; angle between the points around closest point
+            ;angle-0 (v-angle (v-sub (second pts) (last pts)))
+            angs-0-raw (concat (take-last 1 angs-skip1)
+                               (take 2 angs-skip1))
+            ;; correct for discontinuity at -pi/+pi
+            angs-0 (if (> (median (map abs angs-0-raw)) (* 0.8 PI))
+                          (map #(if (neg? %) (+ % TWOPI) %) angs-0-raw)
+                          angs-0-raw)
+            angle-0 (in-pi-pi (median angs-0))
+            ;; angle between the points around opposite point
+            ;angle-opp (v-angle (v-sub (nth pts (inc i-opp)) (nth pts (dec i-opp))))
+            angs-opp-raw (take 3 (drop (dec i-opp) angs-skip1))
+            ;; flip since opposite angle
+            angs-opp-raw (map #(in-pi-pi (+ % PI)) angs-opp-raw)
+            ;; correct for discontinuity at -pi/+pi
+            angs-opp (if (> (median (map abs angs-opp-raw)) (* 0.8 PI))
+                          (map #(if (neg? %) (+ % TWOPI) %) angs-opp-raw)
+                          angs-opp-raw)
+            angle-opp (in-pi-pi (median angs-opp))
+            long-angle (in-pi-pi (median (concat angs-0 angs-opp)))
+            
             ;; find index of single furthest point (TODO: use reduce?)
+            iz (apply max-key (fn [i] (:mag (nth pp i)))
+                      (range (count pp)))
+            ;; reorient around furthest point
+            pp-z (concat (drop iz pp) (take iz pp))
+            pts-z (concat (drop iz pts) (take iz pts))
+            
+            near-pt (first pts)
+            near-opp-pt (nth pts i-opp)
+            far-pt (first pts-z)
+            ;; direction of furthest point
+            far-dir (:ang (first pp-z))
+            
+            ;; check for straight edges - TODO - too rigid?
+;            collin-0? (collinear? (last pts) (first pts) (second pts) angle-tol)
+;            collin-opp? (collinear? (nth pts (dec i-opp)) (nth pts i-opp) (nth pts (inc i-opp)) angle-tol)
+            ;; check for long thin shapes - always rects
+            extrusion (/ (:mag (first pp-z) (:mag (first pp))))
+            rect? (or (>= extrusion 3.1)
+                      (horizontal-angle? (- angle-0 angle-opp) angle-tol))
+                  ;     collin-0? collin-opp?)
+            ]
+        (if rect?
+          (let [;; find index of point opposite to the furthest
+                i-opp-z (apply max-key
+                               (fn [i] (abs (in-pi-pi (- far-dir (:ang (nth pp-z i))))))
+                               (range 3 (- n 2)))
+                ;; more robust? - get opposite point by flipping around cent
+                far-opp-pt (mapv - far-pt)
+                ;; we have all we need: the long angle, short angle assumed perpendicular,
+                ;; and points on long edge and far edges.
+                ;long-angle angle-0
+                perp-angle (+ long-angle PI_2)
+                ;; find vertices
+                vtx [(angle-intersection near-pt long-angle far-pt perp-angle)
+                     (angle-intersection far-pt perp-angle near-opp-pt long-angle)
+                     (angle-intersection near-opp-pt long-angle far-opp-pt perp-angle)
+                     (angle-intersection far-opp-pt perp-angle near-pt long-angle)]
+                vtx (sort-by v-angle vtx)]
+            ;; return: convert back to global coordinates
+            (map #(v-add % cent-pt) vtx))
+          ;; otherwise: is triangle.
+          ;; find furthest points in 120-degree segments opposite furthest
+          (let [;; find index of point in 120-degree segment offset 60-degrees above the furthest
+                i-rot-fwd (apply max-key (fn [i]
+                                           (let [rot (in-pi-pi (- (:ang (nth pp i)) far-dir))]
+                                             (if (>= rot (/ PI 3))
+                                               (:mag (nth pp i)) 0)))
+                                 (range 2 (- n 1)))
+                ;; find index of point in 120-degree segment offset 60-degrees below the furthest
+                i-rot-back (apply max-key (fn [i]
+                                            (let [rot (in-pi-pi (- (:ang (nth pp i)) far-dir))]
+                                              (if (<= rot (- (/ PI 3)))
+                                                (:mag (nth pp i)) 0)))
+                                  (range 2 (- n 1)))
+                vtx [(nth pts i-rot-back)
+                     (nth pts iz)
+                     (nth pts i-rot-fwd)]]
+            ;; return: convert back to global coordinates
+            (map #(v-add % cent-pt) vtx)))))))
+        
+(defn find-vertices-polygon
+  [edge-pts convex? cent-pt]
+  (let [n-segments 24
+        distance-tol 4
+        angle-tol (/ PI 24) ;; 7.5 degrees
+        segx (segment-extrema edge-pts cent-pt n-segments
+                              :maxima-only? convex?)
+        n-segs-ok (count (filter seq segx))]
+    (if (<= n-segs-ok (quot n-segments 2))
+      ;; should not happen, but return:
+      nil
+      (let [;; collapse to a flat sequence of polar points (from segments)
+            all-pp (apply concat segx)
+            ;; find index of single furthest point
             i0 (apply max-key (fn [i] (:mag (nth all-pp i)))
                       (range (count all-pp)))
-            ;; start from most distant point as it must be a true vertex
+            ;; start from furthest point as it must be a vertex
             pp (concat (drop i0 all-pp) (take i0 all-pp))
-            ;; convert back to local rectangular coordinates (origin=mid-pt)
-            pts (map (fn [{:keys [mag ang]}] (polar-xy mag ang)) pp)
-            ;; eliminate points too close to each other, keeping furthest
-            too-close? (mapv (fn [i [xy0 xy1 xy2]]
-                               ;; decide whether to omit the middle point xy1
-                               ;; only consider excluding every second point
-                               (and (= (mod i 2) 1)
-                                    (or
-                                     (< (v-dist xy1 xy0) distance-tol)
-                                     (< (v-dist xy1 xy2) distance-tol))))
-                             (range (count pts))
-                             (triples-wrapped pts))
-            pp-s (keep-indexed (fn [i x] (when-not (nth too-close? i) x)) pp)
-            pts-s (keep-indexed (fn [i x] (when-not (nth too-close? i) x)) pts)
-                                        ;pp-s (if convex? pp pp-s)
-                                        ;pts-s (if convex? pts pts-s)
-            n (count pts-s)
-            ;; check for a long thin shape since it can be assumed a rect.
-            ang0 (:ang (first pp-s))
-            ;; find index of point with opposite angle
-            i-opp (apply max-key
-                         (fn [i] (abs (in-pi-pi (- ang0 (:ang (nth pp-s i))))))
-                         (range 3 (- n 2)))
-                                        ;i-opp (/ n 2)
-            i-perp-a (/ i-opp 2)
-            i-perp-b (/ (+ i-opp n) 2)
-            longways (+ (:mag (first pp-s)) (:mag (nth pp-s i-opp)))
-            sideways (+ (:mag (nth pp-s i-perp-a)) (:mag (nth pp-s i-perp-b)))
-            is-strut? (and (>= longways 24)
-                           (<= sideways 120)
-                           (>= (/ longways sideways) 3.5))]
-        (if is-strut?
-          ;; in Angry Birds long sides are always parallel.
-          ;; for struts (long thin rects) assume right angles
-          (let [pad-a (if (>= i-opp 6) 2 1)
-                pad-b (if (>= (- n i-opp) 6) 2 1)
-                pts-side-a (drop pad-a (drop-last pad-a (take i-opp pts-s)))
-                pts-side-b (drop pad-b (drop-last pad-b (drop i-opp pts-s)))
-                angs-side-a (map (fn [[p1 p2]] (v-angle (v-sub p2 p1)))
-                                 (partition 2 1 pts-side-b))
-                angs-side-b (map (fn [[p1 p2]] (v-angle (v-sub p1 p2))) ;; reverse points for other side
-                                 (partition 2 1 pts-side-b))
-                angs-all (concat angs-side-a angs-side-b)
-                ;; estimate angle of the long sides (parallel) as median of each pair
-                ;; correct for discontinuity at -pi/+pi
-                angs-all* (if (> (median (map abs angs-all)) (* 0.8 PI))
-                            (map #(if (neg? %) (+ % TWOPI) %) angs-all)
-                            angs-all)
-                long-ang (in-pi-pi (median angs-all*))
-                long-grad (angle-to-gradient long-ang)
-                perp-grad (angle-to-gradient (+ long-ang PI_2))
-                med-pt-a (v-avg pts-side-a)
-                med-pt-b (v-avg pts-side-b)
-                far-pt (first pts-s)
-                opp-pt (mapv - far-pt) ;; flip around mid-pt (local coords)
-                ;; start from far-pt and follow original order (increasing angle)
-                vtx [(line-intersection far-pt perp-grad med-pt-a long-grad)
-                     (line-intersection med-pt-a long-grad opp-pt perp-grad)
-                     (line-intersection opp-pt perp-grad med-pt-b long-grad)
-                     (line-intersection med-pt-b long-grad far-pt perp-grad)]]
-            ;; return: convert back to global coordinates
-            (map #(v-add % mid-pt) vtx))
-          ;; otherwise, general shapes
-;          (map #(v-add % mid-pt) pts-s))))))
-          ;; detect edges via collinear points
-          (loop [lines []
-                 vtx []
-                 more-pts (concat pts-s (take 3 pts-s))
-                 prev-line nil
-                 prev-end-pt (first pts-s)
-                 cur-added? false]
-            (let [[p0 p1 p2] (take 3 more-pts)]
-              (println (count lines) "lines," (count vtx) "vtx,"
-                       {:p2 p2
-                        :coll? (if p2 (collinear? p0 p1 p2 angle-tol))
-                        :added? cur-added? :end-pt prev-end-pt})
-              (if p2
-                (if (collinear? p0 p1 p2 angle-tol)
-                  (if cur-added?
-                    (recur lines vtx (next more-pts)
-                           prev-line p2 true)
-                    ;; add line implied by collinear points.
-                    (let [new-line {:ang (v-angle (v-sub p2 p1)) :pt p1}]
-                      (println "new-line" new-line)
-                      (if (nil? prev-line)
-                        (recur (conj lines new-line)
-                               vtx
-                               (next more-pts)
-                               new-line p2 true)
-                        ;; we have a previous line, so find intersection vertex
-                        ;; returns nil when lines are parallel
-                        (if-let [new-vtx (angle-intersection (:pt prev-line)
-                                                             (:ang prev-line)
-                                                             (:pt new-line)
-                                                             (:ang new-line))]
-                          ;; check vertex is within bounding box!
-                          (let [[vx vy] new-vtx
-                                fix-vtx [(max lx-lo (min lx-hi vx))
-                                         (max ly-lo (min ly-hi vy))]
-                                badness (if (= new-vtx fix-vtx) 0 (v-dist new-vtx fix-vtx))]
-                            (println {:badness badness :new-vtx new-vtx :fix-vtx fix-vtx})
-                            (if (<= badness 5)
-                              (recur (conj lines new-line)
-                                     (conj vtx fix-vtx)
-                                     (next more-pts)
-                                     new-line p2 true)
-                              ;; badly out of bounding box, ignore this line.
-                              (recur lines vtx
-                                     (next more-pts)
-                                     prev-line prev-end-pt cur-added?)))
-                              ;; check that it will not truncate under prev-end-pt
-                          ;; i.e check that new-vtx is further along direction of (:ang prev-line)
-;                          (let [delta-angle (if (= new-vtx prev-end-pt)
-;                                              (:ang prev-line)
-;                                              (v-angle (v-sub new-vtx prev-end-pt)))
-;                                angle-along-line (- delta-angle (:ang prev-line))
-;                                new-forward? (< (abs angle-along-line) 0.1)]
-;                            (if true ;new-forward?
-;                              (recur (conj lines new-line)
-;                                     (conj vtx new-vtx)
-;                                     (next more-pts)
-;                                     new-line p2 true)
-;                              ;; truncation, implies bad line angle.
-;                              ;; but we don't know which line is bad.
-;                              ;; just join the points...
-;;                              (recur (conj lines {:pt p1
-;;                                                :ang (v-angle (v-sub p1 prev-end-pt))})
-;;                                   (conj vtx prev-end-pt)
-;;                                   (next more-pts)
-;;                                   new-line p2 false))))))
-;                              ;; no, ignore this line
-;                              (recur lines vtx
-;                                     (next more-pts)
-;                                     prev-line prev-end-pt cur-added?)))
-                          ;; parallel with prev line, so skip it (extending end pt)
-                          (recur lines vtx
-                                 (next more-pts)
-                                 prev-line p2 cur-added?)))))
-                  ;; not collinear
-                  (recur lines vtx
-                         (next more-pts)
-                         prev-line prev-end-pt false))
-                ;; return: convert back to global coordinates
-                (map #(v-add % mid-pt) vtx)))))))))
+            ;; convert back to local rectangular coordinates (cent)
+            pts (map (fn [{:keys [mag ang]}] (polar-xy mag ang)) pp)]
+        ;; now eliminate points that are redundant due to collinearity
+        ;; TODO: detect long thin rects?
+        (loop [vtx (vec (take 1 pts))
+               more-pts (drop 1 pts)]
+          (let [p0 (peek vtx)
+                [p1 p2] (take 2 more-pts)]
+            (if p2
+              (if (collinear? p0 p1 p2 angle-tol)
+                (recur vtx (next more-pts))
+                ;; check for nearest points too close to center
+                ;; (happens when cent-pt on edge of non-convex shape)
+                ;; TODO: better to split non-convex shapes instead
+                (let [p1-d (v-mag p1)
+                      p02-d (apply min (map v-mag [p0 p2]))]
+                  ;(println {:p1-d p1-d :p02-ds p02-ds :p02-d p02-d})
+                  (if (and (< p1-d 16)
+                           (< (/ p1-d p02-d) 0.2))
+                    (recur vtx (next more-pts))
+                    ;; otherwise - vertex
+                    (recur (conj vtx p1)
+                           (next more-pts)))))
+              ;; return: convert back to global coordinates
+              (map #(v-add % cent-pt) vtx))))))))
 
-(defn interior-angle
-  "Interior angle of a triple of points using law of cosines:
-     cosC = (a^2 + b^2 - c^2) / (2ab)
-   where, in a triangle, angle C is opposite side c."
-  [[v0 v1 v2]]
-  (let [a (v-dist v0 v1)
-        b (v-dist v2 v1)
-        c (v-dist v0 v2)]
-    (Math/acos (/ (+ (* a a)
-                     (* b b)
-                     (- (* c c)))
-                  (* 2 a b)))))
+(defn is-circular?
+  [edge-pts cent-pt [x-lo x-hi] [y-lo y-hi]]
+  (let [x-span (- x-hi x-lo)
+        y-span (- y-hi y-lo)]
+    (if (< (abs (- x-span y-span)) 8)
+      ;; squarish.
+      ;; simplest would be to test ratio r-max / rmin ~= 1 on edge points.
+      ;; but detected shapes are noisy so can't distinguish squares.
+      ;; instead we test in each of four segments and average the ratio.
+      (let [segx (segment-extrema edge-pts cent-pt 4 :maxima-only? false)
+            r-max (apply max (map :mag (apply concat segx)))
+            rratios (map (fn [pp]
+                           (if (= 2 (count pp))
+                             (let [rr (map :mag pp)]
+                               (/ (apply max rr) (apply min rr)))
+                             0)) segx)
+            avg-ratio (/ (reduce + rratios)
+                         (count (remove zero? rratios)))]
+        ;; return radius (logical true) if all distances about equal.
+        ;; for a square we expect rmax / rmin = 1.41; for circles = 1
+        (when (<= avg-ratio 1.275)
+          r-max))
+      ;; not squarish, so not a circle
+      false)))
 
 (defn shape-from-coords
   [coords convex? [x-lo x-hi] [y-lo y-hi] ground-level]
   (let [edge-pts (edge-points coords [x-lo x-hi] [y-lo y-hi] ground-level)
-        mid-pt [(* 0.5 (+ x-lo x-hi))
-                (* 0.5 (+ y-lo y-hi))]
-        angle-tol (/ PI 12)
-        distance-tol 6
-        vtx (find-vertices edge-pts convex? mid-pt
-                           [x-lo x-hi] [y-lo y-hi]
-                           angle-tol distance-tol)
-        n-vtx (count vtx)
-        int-angles (map interior-angle (triples-wrapped vtx))
-        int-degrees (map #(* 180 (/ % PI)) int-angles)]
-    (cond
-     (<= n-vtx 2) {:shape nil
-                   :coords vtx}
-     (= n-vtx 3) {:shape :poly
-                  :coords vtx
-                  :angles int-degrees}
-     ;; quadrilateral.
-     (= n-vtx 4) (let [fwd-dists (map (fn [[p0 p1 p2]] (v-dist p1 p2))
-                                      (triples-wrapped vtx))
-                       length (apply max fwd-dists)
-                       width (second (sort fwd-dists))]
-                   {:shape :poly
-                    :coords vtx
-                    :length length
-                    :width width
-                    :angles int-degrees})
-     ;; more complex shape
-     (>= n-vtx 5) (let [dists (map #(v-dist % mid-pt) vtx)
-                        r-max (apply max dists)
-                        r-min (apply min dists)
-                        xs (map first vtx)
-                        ys (map second vtx)
-                        [x-lo x-hi] [(apply min xs) (apply max xs)]
-                        [y-lo y-hi] [(apply min ys) (apply max ys)]]
-                    ;; if all are same distance from mid-pt and squarish then circle
-                    (if (and (<= (- r-max r-min) 6)
-                             (<= (abs (- (- x-hi x-lo)
-                                        (- y-hi y-lo))) 6))
-                      {:shape :circle
-                       :radius r-max
-                       :pos mid-pt}
-                      {:shape :poly
-                       :coords vtx
-                       :angles int-degrees})))))
+        cent-pt (v-avg edge-pts)]
+    (if convex?
+      ;; first, test for a circle
+      (if-let [rad (is-circular? edge-pts cent-pt [x-lo x-hi] [y-lo y-hi])]
+        {:shape :circle
+         :radius rad
+         :pos cent-pt}
+        ;; not circular
+        (let [vtx (find-vertices-tri-quad edge-pts cent-pt)]
+          {:shape :poly
+           :coords vtx}))
+      ;; for non-convex go straight to polygon
+      (let [vtx (find-vertices-polygon edge-pts convex? cent-pt)]
+        {:shape :poly
+         :coords vtx}))))

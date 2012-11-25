@@ -42,3 +42,4 @@
   * planning: birds vs materials
     * estimate ''expected'' final score
 * interface with game server
+* robustify: (try) each shape detection, etc.

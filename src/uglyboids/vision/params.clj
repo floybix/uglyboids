@@ -45,7 +45,7 @@
                         [255,190,99]
                         [183,106,38])
                         ;[144,72,19])    ; border
-          :tolerance 17
+          :tolerance 18
           :size [10 5000]}
    :ground {:colors (list [10,19,57]    ; blue
                           [21,32,83]    ; blue
@@ -68,20 +68,20 @@
                        [165,233,0]      ; nose
                        [202,251,16]     ; nose
                        [116,182,6]      ; nose
-                       [92,189,48]      ; around eyes
-                       [138,202,0]      ; border
-                       [111,228,74]     ; border
-                       [0,0,0]          ; border black
-                       [5,39,17]        ; border black
-                       [135,190,107])   ; border black
-         :tolerance 28
+                       [92,189,48])      ; around eyes
+                       ;[138,202,0]      ; border
+                       ;[111,228,74]     ; border
+                       ;[0,0,0]          ; border black
+                       ;[5,39,17]        ; border black
+                       ;[135,190,107])   ; border black
+         :tolerance 15 ;28
          :size [90 2e9]}
    :glass {:colors (list [99,194,245]
                          [113,206,248]
                          [148,218,250]
                          [130,209,248])
                          ;[231,247,254]) ; ice-white shine, same as sky
-           :tolerance 17
+           :tolerance 13
            :size [20 5000]}
    :stone {:colors (list [160,160,160]
                          [130,130,130]
