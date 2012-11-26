@@ -55,6 +55,26 @@
   [v1 v2]
   (v-mag (v-sub v1 v2)))
 
+(defn bounding-box
+  [coords]
+  (let [[x0 y0] (first coords)]
+    (loop [x-lower x0
+           y-lower y0
+           x-upper x0
+           y-upper y0
+           pts coords]
+      (if (seq pts)
+        (let [[x y] (first pts)
+              x (int x)
+              y (int y)]
+          (recur (min x-lower x)
+                 (min y-lower y)
+                 (max x-upper x)
+                 (max y-upper y)
+                 (next pts)))
+        ;; return:
+        [[x-lower y-lower] [x-upper y-upper]]))))
+
 (defn neighbours
   [[x y] [min-x max-x] [min-y max-y]]
 ;  (for [xi [(dec x) x (inc x)]

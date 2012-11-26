@@ -5,7 +5,7 @@
 
 (def level
   {:start [501 699]
-   :birds [:red :red :red :red :red]
+   :birds [:red-bird :red-bird :red-bird :red-bird :red-bird]
    :objs [{:type :static
            :shape :box
            :wh [1920 230]

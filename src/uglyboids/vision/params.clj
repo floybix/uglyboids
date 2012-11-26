@@ -50,11 +50,11 @@
    :ground {:colors (list [10,19,57]    ; blue
                           [21,32,83]    ; blue
                           [14,25,17]    ; blue
-                          [31,45,103]   ; blue
-                          [51,110,21]   ; green
-                          [82,153,11]   ; green
-                          [194,254,13]) ; green
-            :tolerance 10
+                          [31,45,103])   ; blue
+                          ;[51,110,21]   ; green
+                          ;[82,153,11]   ; green
+                          ;[194,254,13]) ; green
+            :tolerance 20
             :size [200 1e7]}
    :trajectory {:colors (list [255,255,255]
                               [239,239,239])
@@ -68,16 +68,16 @@
                        [165,233,0]      ; nose
                        [202,251,16]     ; nose
                        [116,182,6]      ; nose
-                       [92,189,48])      ; around eyes
-                       ;[138,202,0]      ; border
+                       [92,189,48]      ; around eyes
+                       [138,202,0])      ; border
                        ;[111,228,74]     ; border
                        ;[0,0,0]          ; border black
                        ;[5,39,17]        ; border black
                        ;[135,190,107])   ; border black
-         :tolerance 15 ;28
+         :tolerance 18 ;28
          :size [90 2e9]}
-   :glass {:colors (list [99,194,245]
-                         [113,206,248]
+   :glass {:colors (list [113,206,248]
+                         [99,194,245]
                          [148,218,250]
                          [130,209,248])
                          ;[231,247,254]) ; ice-white shine, same as sky
@@ -108,3 +108,6 @@
                  :tolerance 20
                  :size [50 1000]}
    ))
+
+(def bird-types
+  #{:red-bird :blue-bird :yellow-bird})

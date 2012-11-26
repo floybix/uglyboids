@@ -5,12 +5,12 @@
 
 ;; note radius is in pixels
 (def bird-attrs
-  {:red {:radius 12
-         :density 5
-         :restitution 0.4}
-   :blue {:radius 6
-          :density 5
-          :restitution 0.4}})
+  {:red-bird {:radius 12
+              :density 5
+              :restitution 0.4}
+   :blue-bird {:radius 6
+               :density 5
+               :restitution 0.4}})
 
 (def materials
   {:static {:density 1}
