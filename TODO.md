@@ -1,10 +1,10 @@
 
 ## Priorities ##
 
-* get my own naive agent working from screenshots
-* modify framework server to skip Matlab
-* replicate framework client code
-* (get client working with semi-manual server)
+* get my own naive agent working
+  * raycast to check impact angles (esp. static barriers)
+  * adjust shapes to stability
+  * basic taps (just before impact)
 * send for compatability testing
 
 ## Vision ##
@@ -25,6 +25,7 @@
 
 ## Other ##
 
+* draw colors to indicate object types in world
 * contact handler to destroy pigs
   * different pigs? helmeted, tiny
 * contact handler to hit wood/glass/stone
@@ -40,3 +41,4 @@
 * robustify: use (try) on each shape detection, etc.
 * can scale of world vary?
   * use size of slingshot as scale factor for world?
+* need to destroy World when creating a new one to avoid overflow?

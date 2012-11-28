@@ -234,7 +234,6 @@
 
 (defn draw-shapes!
   [blobs]
-  (dbg "DRAWING SHAPES")
   (let [g (.getGraphics ^BufferedImage @display-img)
         sty (style :foreground Color/YELLOW)]
     (doseq [blob blobs
@@ -259,6 +258,7 @@
 
 (defn scene-from-shapes
   [shapes]
+  ;; TODO: first check for failed or success screen
   (let [sling-like (filter (fn [s]
                              (and (= (:type s) :static-wood)
                                   (let [height (abs (apply - (:y-range s)))]
@@ -316,11 +316,14 @@
                                                               :paint paint))
                        :on-close :dispose)
                 show!)))
+  (println "scanning image for shapes...")
   (let [blobs (identify-shapes img)]
     (when *debug*
       (reset! -blobs blobs)
+      (println "drawing shapes...")
       (draw-shapes! blobs))
     (let [adj-shapes (adjust-shapes blobs)]
+      (println "converting to scene...")
       (scene-from-shapes adj-shapes))))
 
 (defn scene-from-image-file

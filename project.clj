@@ -7,5 +7,4 @@
   :dependencies [[cljbox2d "0.2.0-SNAPSHOT"]
                  [seesaw "1.4.2"]
                  [org.clojure/clojure "1.4.0"]]
-  :resource-paths ["lib-extras"
-                   "lib-extras/marvin/framework/marvin_1.4.2.jar"])
+  :resource-paths ["framework/version1.1s/Client.jar"])

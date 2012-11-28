@@ -4,6 +4,11 @@
 (def px-width 1920)
 (def ground-level 860)
 
+(def aspect-ratio (/ px-width px-height))
+
+(def world-width 100)
+(def world-height (/ world-width aspect-ratio))
+
 ;; note radius is in pixels
 (def bird-attrs
   {:red-bird {:radius 12
@@ -24,3 +29,4 @@
 (def launch-speed 27)
 
 (def linear-damping 0.2)
+(def angular-damping 0.01)
