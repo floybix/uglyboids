@@ -121,7 +121,7 @@ horizontal or vertical coordinate."
                  (update-in left-xs [iy] min-ok x)
                  (update-in right-xs [iy] max-ok x)
                  (update-in bot-ys [ix] min-ok y)
-                 (update-in top-ys [ix] max-ok yb))) ;; since y increases "down"; TODO: this sucks
+                 (update-in top-ys [ix] max-ok yb))) ;; since y in pixels increases "down"
         ;; merge sets of points
         (let [to-points-lr (fn [i x] [x (+ i y-lo)])
               to-points-tb (fn [i y] [(+ i x-lo) y])

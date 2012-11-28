@@ -9,9 +9,9 @@
           [javax.imageio ImageIO]
           [javax.swing JFrame JPanel]))
 
-;; ## Debugging stuff
+;; ## debugging stuff
 
-(def ^:dynamic *debug* true)
+(def ^:dynamic *debug* false)
 
 (defn dbg [& args]
   (when *debug* (apply println args)))
@@ -22,12 +22,10 @@
 
 ;; pixel ranges within which to look for shapes
 
-(def min-x 0)
-(def max-x 1885)
-(def min-y 280)
-(def max-y 1000)
-
-(def ground-level (atom max-y))
+(def min-x 5)
+(def max-x 1910)
+(def min-y 180)
+(def max-y 860)
 
 (def cells (vec (for [y (range 0 px-height)]
                   (vec (for [x (range 0 px-width)]
@@ -39,9 +37,8 @@
 
 (defn reset-cells!
   []
-  (doseq [y (range 0 px-height)
-          x (range 0 px-width)]
-    (reset! (get-cell [x y]) nil)))
+  (doseq [cell (flatten cells)]
+    (reset! cell nil)))
 
 (defn r-g-b
   [int-color]
@@ -118,7 +115,6 @@
         y-span (- y-hi y-lo)
         max-span (max x-span y-span)]
     ;; always split if one dimension exceeds some size
-    ;; TODO: split on discontinuities in the shape!
     (if (>= max-span 80)
       ;; split it up
       (let [split-fn (if (>= x-span y-span)
@@ -132,7 +128,7 @@
                     (static-shapes-from-coords cc [x0 x1] [y0 y1])))
                 cc-split))
       ;; no need to split, proceed with shape
-      (list (shape-from-coords coords false [x-lo x-hi] [y-lo y-hi] @ground-level)))))
+      (list (shape-from-coords coords false [x-lo x-hi] [y-lo y-hi] ground-level)))))
 
 (defn shape-from-blob
   [{:keys [type coords x-range y-range mid-pt]}]
@@ -141,7 +137,7 @@
     (case type
       :ground (do
                 ;; update ground level, used for other objects
-                (swap! ground-level min y-lo)
+                ;(swap! ground-level min y-lo)
                 {:shape :poly
                  :coords (list [x-hi y-lo]
                                [x-lo y-lo]
@@ -157,7 +153,7 @@
             :radius (quot (max (- x-hi x-lo) (- y-hi y-lo)) 2)
             :pos mid-pt}
       :static-surface (static-shapes-from-coords coords x-range y-range)
-      :static-wood (shape-from-coords coords true x-range y-range @ground-level)
+      :static-wood (shape-from-coords coords true x-range y-range ground-level)
       ;; else - dynamic blocks
       ;; do not drop edges to ground level
       (shape-from-coords coords true x-range y-range max-y))))
@@ -172,8 +168,7 @@
   [^BufferedImage img]
   (let [id-counter (atom 0)
         ^BufferedImage class-img (deepCopyBI img)
-        canv (select @the-frame [:#canvas])
-        ok-params (dissoc object-params :tap :trajectory :sky
+        ok-params (dissoc object-params :tap :trajectory :sky :ground
                           :yellow-bird)]
     (when *debug*
       (doseq [y (range 0 px-height)
@@ -184,14 +179,12 @@
                      .darker
                      .darker
                      .getRGB)))
-                                        ;(.getRGB (.darker (.darker (Color. (.getRGB class-img x y)))))))
       (reset! display-img class-img)
-      (repaint! canv))
+      (repaint! @the-frame))
     (reset-cells!)
     ;; recursively build up 'blobs'
-    ;; start from bottom because ground-level is used by later shapes
-    (loop [pts (for [y (reverse (range 0 px-height))
-                     x (range 0 px-width)] [x y])
+    (loop [pts (for [y (range min-y (inc max-y))
+                     x (range min-x (inc max-x))] [x y])
            blobs []]
       (if (seq pts)
         (let [[x y] (first pts)
@@ -222,7 +215,7 @@
                         (let [seed-int (rgb-int (first my-colors))]
                           (doseq [[x y] coords]
                             (.setRGB class-img x y seed-int)))
-                        (invoke-later (repaint! canv))
+                        (invoke-later (repaint! @the-frame))
                         (dbg "FOUND" type "(" id "), of" pxx "px. "
                              "x-range" (:x-range blob)
                              "y-range" (:y-range blob)))
@@ -264,27 +257,45 @@
   (dbg "ADJUSTING SHAPES")
   shapes)
 
-(defn reconstruct-scene
-  [img]
-  (let [blobs (identify-shapes img)]
-    (when *debug*
-      (reset! -blobs blobs)
-      (draw-shapes! blobs))
-    (let [adj-shapes (adjust-shapes blobs)
-          sling-like (filter (fn [s]
-                               (and (= (:type s) :static-wood)
-                                    (let [height (abs (apply - (:y-range s)))]
-                                      (> height 90))))
-                             adj-shapes)
-          sling (min-key #(first (:mid-pt %)) sling-like)
-          sling-id (:id sling)
-          focus-pt [(first (:mid-pt sling))
-                    (second (first (:y-range sling)))]
-          birds (filter #(bird-types (:type %)) adj-shapes)
-          ;; order from left to right
-          bird-order (sort-by #(first (:pos %)) birds)
-          ]
-      adj-shapes)))
+(defn scene-from-shapes
+  [shapes]
+  (let [sling-like (filter (fn [s]
+                             (and (= (:type s) :static-wood)
+                                  (let [height (abs (apply - (:y-range s)))]
+                                    (> height 90))))
+                           shapes)
+        sling (apply min-key #(first (:mid-pt %)) sling-like)
+        focus-pt [(first (:mid-pt sling))
+                  (first (:y-range sling))]
+        ;; get rid of any mess around sling as can interfere with birds
+        sling-mess (filter (fn [s]
+                             (let [[x-lo x-hi] (:x-range s)
+                                   [y-lo y-hi] (:y-range s)]
+                               (and (<= (- x-lo 10) (first focus-pt) (+ x-hi 10))
+                                    (<= (- y-lo 10) (second focus-pt) (+ y-hi 10)))))
+                             shapes)
+        birds (filter #(bird-types (:type %)) shapes)
+        ;; order by distance from slingshot
+        bird-order (sort-by (fn [s]
+                              (let [pos (:pos @(:geom s))]
+                                (abs (- (first pos) (first focus-pt)))))
+                            birds)
+        special-ids (into (set (map :id birds))
+                          (map :id sling-mess))
+        normal-shapes (remove #(special-ids (:id %)) shapes)
+        objs (mapcat (fn [s]
+                       (let [otype (:type s)
+                             type (if (#{:static-wood :static-surface :ground} otype)
+                                    :static otype)]
+                         (if (= otype :static-surface)
+                           (for [geom-i (flatten (list @(:geom s)))]
+                             {:type :static, :shape :polyline
+                              :coords (:coords geom-i)})
+                           (list (assoc @(:geom s) :type type)))))
+                     normal-shapes)]
+    {:start focus-pt
+     :birds (map :type bird-order)
+     :objs objs}))
 
 (defn paint
   [c g]
@@ -292,21 +303,32 @@
     (draw g (image-shape 0 0 img)
           (style :background :black))))
 
-(defn -main [& args]
-  (let [default "/home/felix/devel/uglyboids/screenshots/angrybirds_1_2.png"
-        screenshot (if (seq args) (first args) default)
-        img (ImageIO/read (File. screenshot))]
+(defn scene-from-image
+  [img]
+  (when *debug*
     (reset! display-img img)
+    (reset! the-frame
+            (-> (frame :title "Ugly Boids vision",
+                       :width px-width
+                       :height px-height
+                       :content (border-panel :hgap 5 :vgap 5 :border 5
+                                              :center (canvas :id :canvas
+                                                              :paint paint))
+                       :on-close :dispose)
+                show!)))
+  (let [blobs (identify-shapes img)]
     (when *debug*
-     (reset! the-frame
-             (-> (frame :title "Hello",
-                        :width px-width
-                        :height (+ px-height 30)
-                        :content (border-panel :hgap 5 :vgap 5 :border 5
-                                               :center (canvas :id :canvas :background "#BBBBDD"
-                                                               :paint paint)
-                                               :south (horizontal-panel :items ["Uglyboids..."]))
-                        :on-close :dispose)
-                 show!)))
-    (time (reconstruct-scene img))
-    0))
+      (reset! -blobs blobs)
+      (draw-shapes! blobs))
+    (let [adj-shapes (adjust-shapes blobs)]
+      (scene-from-shapes adj-shapes))))
+
+(defn scene-from-image-file
+  [img-file]
+  (let [img (ImageIO/read (File. img-file))]
+    (scene-from-image img)))
+
+(defn -main
+  [screenshot & args]
+  (binding [*debug* true]
+    (println (time (scene-from-image-file screenshot)))))

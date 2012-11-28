@@ -2,6 +2,7 @@
 
 (def px-height 1080)
 (def px-width 1920)
+(def ground-level 860)
 
 ;; note radius is in pixels
 (def bird-attrs

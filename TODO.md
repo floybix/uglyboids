@@ -1,9 +1,14 @@
 
+## Priorities ##
+
+* get my own naive agent working from screenshots
+* modify framework server to skip Matlab
+* replicate framework client code
+* (get client working with semi-manual server)
+* send for compatability testing
+
 ## Vision ##
 
-* find focus point
-  * use size of slingshot as scale factor for world?
-* work out number and order of birds remaining
 * make sure we have correct y-coordinate interpretation!
   * from image, and in GIEngine, top left is 0,0
   * but in world (as in cartesian plane), increasing y goes "up" (i.e. gravity points negative)
@@ -20,11 +25,10 @@
 
 ## Other ##
 
-* test more screenshots
 * contact handler to destroy pigs
   * different pigs? helmeted, tiny
-* contact handler to destroy wood/glass/stone
-* estimate take-off angle to hit a given point - within angle range
+* contact handler to hit wood/glass/stone
+* estimate take-off angle to hit a given point - within impact angle range
 * tap effects for blue and yellow birds
 * estimate take-off angle and tap-time to hit point(s) for blue and yellow
 * heuristic strategies
@@ -33,4 +37,6 @@
   * planning: birds vs materials
     * estimate ''expected'' final score
 * interface with game server
-* robustify: (try) each shape detection, etc.
+* robustify: use (try) on each shape detection, etc.
+* can scale of world vary?
+  * use size of slingshot as scale factor for world?
