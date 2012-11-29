@@ -4,6 +4,7 @@
            (ab.framework.player Configuration)
            (java.util ArrayList))
   (:use uglyboids.core
+        uglyboids.physics-params
         [uglyboids.vision :only [scene-from-image-file]]
         [cljbox2d.vec2d :only [TWOPI PI in-pi-pi polar-xy]]))
 
@@ -13,39 +14,17 @@
 
 (def shots-left (atom -1))
 
-(defn level-end-state?
-  []
-  ;; check number of birds and number of pigs
-  (let [n-pigs (count @pigs)
-        n-birds (+ (count @bird-queue)
-                   (if (nil? @bird) 0 1))]
-    (if (zero? n-pigs)
-      "success"
-      ;; check for giant level-failed pig:
-      (if false ;(and (= n-pigs 1)
-          ;     (> (radius (fixture (first @pigs)))
-          ;        10))
-        "failure"
-        (if (zero? n-birds)
-          "failure"
-          ;; else
-          false)))))
-
 (defn scene-snapshot!
   [robot]
   (.screenShot robot "im.png")
   (let [new-scene (scene-from-image-file (str env-path "im.png"))]
-    (reset! scene new-scene)
-    (println "building world...")
-    (setup-world!)
-    (when (neg? @shots-left)
-      (reset! shots-left (count (:birds scene))))))
+    (reset! scene new-scene)))
 
 (defn do-shots!
   [robot shots]
   (let [al (ArrayList.)
         [x0-px y0-px] (world-to-px @focus-world)
-        mag-px (- x0-px 10)]
+        mag-px (min 180 (- x0-px 10))]
     (doseq [shot shots
             :let [ang (:angle shot)
                   tap (:tap-t shot)
@@ -59,6 +38,11 @@
         (swap! shots-left dec)))
     (.shoot robot al)))
 
+(defn simulate-shot!
+  [shot]
+  (shoot! (:angle shot))
+  (simulate-for (+ (:flight shot) 3)))
+
 (defn bangbangbang!
   [robot]
   (if (zero? @shots-left)
@@ -68,17 +52,23 @@
       false)
     (do
       (scene-snapshot! robot)
-      (if-let [end-state (level-end-state?)]
+      (if (= (:state @scene) :in-play)
         (do
-          (.finishRun robot)
-          (println "level ended:" end-state)
-          false)
-        ;; still in game
-        (do
+          (println "building world...")
+          (setup-world!)
+          (when (neg? @shots-left)
+            (reset! shots-left (count (:birds scene))))
           (println "naively choosing a shot...")
           (let [shot (choose-shot)]
+            (println "estimating effects...")
+            (simulate-shot! shot)
             (do-shots! robot [shot])
-            true))))))
+            true))
+        ;; end state
+        (do
+          (.finishRun robot)
+          (println "level ended:" (:state @scene))
+          false)))))
 
 (defn -main
   [& args]
@@ -86,10 +76,7 @@
         robot (ClientActionRobot. (into-array [serverip]))]
     ;; TODO - how to pass in team id?
     (.configure robot)
-    ;; nextLevel does not the require segmentation. However, nextLevel can only be called when
-    ;; a level is completed. loadLevel can be called during any time in the game.
-    ;; ar.loadLevel(conf.getMax_level() will achieve the same result as nextLevel method
-    ;(.nextLevel robot)
+    (.loadLevel robot (int-array [1]))
     (loop [i 0]
       (if (bangbangbang! robot)
         ;; keep going
@@ -97,7 +84,7 @@
         ;; level finished
         (let [conf (.getConfiguration robot)
               ;;(.nextLevel robot)
-              new-ok? (.loadLevel robot (.getMax_level conf))]
+              new-ok? (.loadLevel robot (int-array (.getMax_level conf)))]
           (println "configuration: " conf)
           (if new-ok?
             (do
@@ -106,5 +93,6 @@
               (recur (inc i)))
             ;; finish up
             (do
+              (println "next level command failed, exiting.")
               (println (.getConfiguration robot))
               (.finishPlay robot))))))))

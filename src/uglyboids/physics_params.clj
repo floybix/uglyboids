@@ -1,8 +1,8 @@
 (ns uglyboids.physics-params)
 
-(def px-height 1080)
-(def px-width 1920)
-(def ground-level 860)
+(def px-height 768)
+(def px-width 1244)
+(def ground-level 612)
 
 (def aspect-ratio (/ px-width px-height))
 
@@ -11,12 +11,15 @@
 
 ;; note radius is in pixels
 (def bird-attrs
-  {:red-bird {:radius 12
+  {:red-bird {:radius 9;12
               :density 5
               :restitution 0.4}
-   :blue-bird {:radius 6
+   :blue-bird {:radius 4;6
                :density 5
-               :restitution 0.4}})
+               :restitution 0.4}
+   :yellow-bird {:radius 10
+                 :density 5
+                 :restitution 0.2}})
 
 (def materials
   {:static {:density 1}

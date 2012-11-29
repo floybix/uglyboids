@@ -39,14 +39,14 @@
                             [51,8,17]     ; black border
                             [204,196,197]) ; eye shade grey
               :tolerance 10
-              :size [90 1000]}          ; was 0
+              :size [70 1000]}          ; was 0
    :wood {:colors (list [226,145,38]
                         [210,127,31]
                         [255,190,99]
                         [183,106,38])
                         ;[144,72,19])    ; border
           :tolerance 18
-          :size [10 5000]}
+          :size [25 5000]}
    :ground {:colors (list [10,19,57]    ; blue
                           [21,32,83]    ; blue
                           [14,25,17]    ; blue
@@ -68,45 +68,45 @@
                        [165,233,0]      ; nose
                        [202,251,16]     ; nose
                        [116,182,6]      ; nose
-                       [92,189,48]      ; around eyes
-                       [138,202,0])      ; border
+                       [92,189,48])      ; around eyes
+                       ;[138,202,0])      ; border
                        ;[111,228,74]     ; border
                        ;[0,0,0]          ; border black
                        ;[5,39,17]        ; border black
                        ;[135,190,107])   ; border black
          :tolerance 18 ;28
-         :size [90 2e9]}
+         :size [25 2e9]}
    :glass {:colors (list [113,206,248]
                          [99,194,245]
                          [148,218,250]
                          [130,209,248])
                          ;[231,247,254]) ; ice-white shine, same as sky
-           :tolerance 13
-           :size [20 5000]}
+           :tolerance 10
+           :size [25 5000]}
    :stone {:colors (list [160,160,160]
                          [130,130,130]
                          [148,148,148])
            :tolerance 5
-           :size [20 5000]}
+           :size [25 5000]}
    :static-wood {:colors (list [202,151,94]
                                [127,65,32]
                                [166,112,53]
                                [48,23,8])
                  :tolerance 24
-                 :size [90 5000]}
+                 :size [60 5000]}
    :static-surface {:colors (list [52 34 19]
                                   [65 42 24]
                                   [126 92 66]
                                   [162 122 91])
                     :tolerance 28
-                    :size [100 1e9]}
+                    :size [50 1e9]}
    :blue-bird {:colors (list [99,170,197]
-                             [255,174,0])
+                             [202 143 9]);[255,174,0])
                :tolerance 20
-               :size [20 1000]}
+               :size [18 200]}
    :yellow-bird {:colors (list [241,219,32])
                  :tolerance 20
-                 :size [50 1000]}
+                 :size [100 200]}
    ))
 
 (def bird-types

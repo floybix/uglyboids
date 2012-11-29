@@ -145,7 +145,7 @@
 
 (defn choose-shot
   []
-  (let [pig (first @pigs)
+  (let [pig (apply min-key #(first (position %)) @pigs)
         target-pt (position pig)
         angs (calculate-launch-angles-for @focus-world
                                           target-pt
@@ -156,6 +156,16 @@
                                       launch-speed 10.0 ang)]
     (println "chose angle" ang "with flight time" flight)
     {:angle ang
-     :impact-t flight
-     :tap-t (* flight 0.5)
+     :flight flight
+     :tap-t (* flight 0.85)
      :target-body pig}))
+
+(defn simulate-for
+  [dur]
+  (let [start-t @world-time]
+    (loop [i 0]
+      (if (< @world-time (+ start-t dur))
+        (do
+          (step! (/ 1.0 15.0))
+          (recur (inc i)))
+        (println "i =" i)))))

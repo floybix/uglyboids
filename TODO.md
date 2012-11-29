@@ -9,6 +9,9 @@
 
 ## Vision ##
 
+* fix up bad struts e.g. level 1-5, 1-21
+* detect overlapping pigs/birds as segmentation slips
+  
 * make sure we have correct y-coordinate interpretation!
   * from image, and in GIEngine, top left is 0,0
   * but in world (as in cartesian plane), increasing y goes "up" (i.e. gravity points negative)

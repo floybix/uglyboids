@@ -23,9 +23,9 @@
 ;; pixel ranges within which to look for shapes
 
 (def min-x 5)
-(def max-x 1910)
-(def min-y 180)
-(def max-y 860)
+(def max-x (- px-width 10))
+(def min-y 150)
+(def max-y (+ ground-level 2))
 
 (def cells (vec (for [y (range 0 px-height)]
                   (vec (for [x (range 0 px-width)]
@@ -149,6 +149,9 @@
       :blue-bird {:shape :circle
                   :radius (:radius (:blue-bird bird-attrs))
                   :pos mid-pt}
+      :yellow-bird {:shape :circle
+                    :radius (:radius (:yellow-bird bird-attrs))
+                    :pos mid-pt}
       :pig {:shape :circle
             :radius (quot (max (- x-hi x-lo) (- y-hi y-lo)) 2)
             :pos mid-pt}
@@ -168,8 +171,7 @@
   [^BufferedImage img]
   (let [id-counter (atom 0)
         ^BufferedImage class-img (deepCopyBI img)
-        ok-params (dissoc object-params :tap :trajectory :sky :ground
-                          :yellow-bird)]
+        ok-params (dissoc object-params :tap :trajectory :sky :ground)]
     (when *debug*
       (doseq [y (range 0 px-height)
               x (range 0 px-width)]
@@ -208,8 +210,8 @@
                       [y-lo y-hi] (:y-range blob)]
                   ;; check within allowed size range
                   (if (and (<= min-px pxx max-px)
-                           (>= (- x-hi x-lo) 5)
-                           (>= (- y-hi y-lo) 5))
+                           (>= (- x-hi x-lo) 4)
+                           (>= (- y-hi y-lo) 4))
                     (do
                       (when *debug*
                         (let [seed-int (rgb-int (first my-colors))]
@@ -258,44 +260,64 @@
 
 (defn scene-from-shapes
   [shapes]
-  ;; TODO: first check for failed or success screen
-  (let [sling-like (filter (fn [s]
-                             (and (= (:type s) :static-wood)
-                                  (let [height (abs (apply - (:y-range s)))]
-                                    (> height 90))))
-                           shapes)
-        sling (apply min-key #(first (:mid-pt %)) sling-like)
-        focus-pt [(first (:mid-pt sling))
-                  (first (:y-range sling))]
-        ;; get rid of any mess around sling as can interfere with birds
-        sling-mess (filter (fn [s]
-                             (let [[x-lo x-hi] (:x-range s)
-                                   [y-lo y-hi] (:y-range s)]
-                               (and (<= (- x-lo 10) (first focus-pt) (+ x-hi 10))
-                                    (<= (- y-lo 10) (second focus-pt) (+ y-hi 10)))))
+  ;; TODO: check for success screen
+  (if (some (fn [s]
+              (when (= (:type s) :pig)
+                (let [[x-lo x-hi] (:x-range s)
+                      [y-lo y-hi] (:y-range s)
+                      span (max (- x-hi x-lo)
+                                (- y-hi y-lo))]
+                  (when (>= span 90) true))))
+            shapes)
+    {:state :failed}
+    (let [sling-like (filter (fn [s]
+                               (and (= (:type s) :static-wood)
+                                    (let [height (abs (apply - (:y-range s)))]
+                                      (> height 60))))
                              shapes)
-        birds (filter #(bird-types (:type %)) shapes)
-        ;; order by distance from slingshot
-        bird-order (sort-by (fn [s]
-                              (let [pos (:pos @(:geom s))]
-                                (abs (- (first pos) (first focus-pt)))))
-                            birds)
-        special-ids (into (set (map :id birds))
-                          (map :id sling-mess))
-        normal-shapes (remove #(special-ids (:id %)) shapes)
-        objs (mapcat (fn [s]
-                       (let [otype (:type s)
-                             type (if (#{:static-wood :static-surface :ground} otype)
-                                    :static otype)]
-                         (if (= otype :static-surface)
-                           (for [geom-i (flatten (list @(:geom s)))]
-                             {:type :static, :shape :polyline
-                              :coords (:coords geom-i)})
-                           (list (assoc @(:geom s) :type type)))))
-                     normal-shapes)]
-    {:start focus-pt
-     :birds (map :type bird-order)
-     :objs objs}))
+          sling (when (seq sling-like)
+                  (apply min-key #(first (:mid-pt %)) sling-like))
+          focus-pt (when sling [(first (:mid-pt sling))
+                                (+ 10 (first (:y-range sling)))])
+          birds (filter #(bird-types (:type %)) shapes)
+          ;; alternative method to find focus point: the highest bird
+          focus-pt (if (or (nil? sling)
+                           (let [span (abs (apply - (:x-range sling)))]
+                             (> span 33)))
+                     (min-key first (map :mid-pt birds))
+                     focus-pt)
+          ;; order by distance from slingshot
+          bird-order (sort-by (fn [s]
+                                (let [pos (:pos @(:geom s))]
+                                  (abs (- (first pos) (first focus-pt)))))
+                              birds)
+          ;; get rid of any mess around sling as can interfere with birds
+          sling-mess (filter (fn [s]
+                               (let [[x-lo x-hi] (:x-range s)
+                                     [y-lo y-hi] (:y-range s)]
+                                 (and (<= (- x-lo 10) (first focus-pt) (+ x-hi 10))
+                                      (<= (- y-lo 10) (second focus-pt) (+ y-hi 10)))))
+                             shapes)
+          pigs (filter #(= (:type %) :pig) shapes)
+          special-ids (set (map :id (concat birds sling-mess)))
+          normal-shapes (remove #(special-ids (:id %)) shapes)
+          objs (mapcat (fn [s]
+                         (let [otype (:type s)
+                               type (if (#{:static-wood :static-surface :ground} otype)
+                                      :static otype)]
+                           (if (= otype :static-surface)
+                             (for [geom-i (flatten (list @(:geom s)))]
+                               {:type :static, :shape :polyline
+                                :coords (:coords geom-i)})
+                             (list (assoc @(:geom s) :type type)))))
+                       normal-shapes)
+          ]
+      {:state (cond (zero? (count pigs)) :success
+                    (zero? (count birds)) :failed
+                    :else :in-play)
+       :start focus-pt
+       :birds (map :type bird-order)
+       :objs objs})))
 
 (defn paint
   [c g]
