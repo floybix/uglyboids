@@ -6,15 +6,17 @@
 
 (def aspect-ratio (/ px-width px-height))
 
-(def world-width 100)
-(def world-height (/ world-width aspect-ratio))
+;; size of world (in m) can vary across levels!
+(def base-world-width 100)
+(def world-width (atom base-world-width))
+(def world-height (atom (/ @world-width aspect-ratio)))
 
 ;; note radius is in pixels
 (def bird-attrs
-  {:red-bird {:radius 9;12
+  {:red-bird {:radius 7
               :density 5
               :restitution 0.4}
-   :blue-bird {:radius 4;6
+   :blue-bird {:radius 4
                :density 5
                :restitution 0.4}
    :yellow-bird {:radius 10
@@ -29,7 +31,7 @@
    :pig {:density 2}
    })
 
-(def launch-speed 27)
+(def launch-speed 27.4)
 
-(def linear-damping 0.2)
+(def linear-damping 0.1)
 (def angular-damping 0.01)

@@ -7,4 +7,6 @@
   :dependencies [[cljbox2d "0.2.0-SNAPSHOT"]
                  [seesaw "1.4.2"]
                  [org.clojure/clojure "1.4.0"]]
-  :resource-paths ["framework/version1.1s/Client.jar"])
+  :resource-paths ["framework/version1.1s/Client.jar"]
+  :main uglyboids.client
+  :aot [uglyboids.client uglyboids.vision uglyboids.interactive])

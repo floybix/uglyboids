@@ -74,7 +74,7 @@
                        ;[0,0,0]          ; border black
                        ;[5,39,17]        ; border black
                        ;[135,190,107])   ; border black
-         :tolerance 18 ;28
+         :tolerance 15 ;28
          :size [25 2e9]}
    :glass {:colors (list [113,206,248]
                          [99,194,245]
@@ -92,13 +92,13 @@
                                [127,65,32]
                                [166,112,53]
                                [48,23,8])
-                 :tolerance 24
+                 :tolerance 28
                  :size [60 5000]}
    :static-surface {:colors (list [52 34 19]
                                   [65 42 24]
                                   [126 92 66]
                                   [162 122 91])
-                    :tolerance 28
+                    :tolerance 26
                     :size [50 1e9]}
    :blue-bird {:colors (list [99,170,197]
                              [202 143 9]);[255,174,0])
@@ -106,7 +106,7 @@
                :size [18 200]}
    :yellow-bird {:colors (list [241,219,32])
                  :tolerance 20
-                 :size [100 200]}
+                 :size [45 200]}
    ))
 
 (def bird-types

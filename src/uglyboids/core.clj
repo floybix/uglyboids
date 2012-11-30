@@ -17,26 +17,27 @@
 
 (def ground-body (atom nil))
 
-(def world-to-px-scale
-  (let [xscale (/ px-width world-width)
-        yscale (/ px-height world-height)]
+(defn world-to-px-scale
+  []
+  (let [xscale (/ px-width @world-width)
+        yscale (/ px-height @world-height)]
     (min xscale yscale)))
 
 (defn world-to-px
   "Convert a point in Box2d world coordinates to screen pixels."
   [[x y]]
-  (let [scale world-to-px-scale]
+  (let [scale (world-to-px-scale)]
     [(* x scale)
      ;; pixels have flipped y (0px at top)
-     (* (- world-height y) scale)]))
+     (* (- @world-height y) scale)]))
 
 (defn px-to-world
   "Convert a point in screen pixels to Box2d world coordinates."
   [[xp yp]]
-  (let [scale world-to-px-scale]
+  (let [scale (world-to-px-scale)]
     [(/ xp scale)
      ;; pixels have flipped y (0px at top)
-     (- world-height (/ yp scale))]))
+     (- @world-height (/ yp scale))]))
 
 (defn poly-edges
   [vertices attrs]
@@ -46,7 +47,7 @@
 (defn make-bird!
   [bird-type]
   (let [attr (bird-type bird-attrs)
-        radius (/ (:radius attr) world-to-px-scale)
+        radius (/ (:radius attr) (world-to-px-scale))
         bod (body! {:position @focus-world
                     :bullet true}
                    {:shape (circle radius)
@@ -64,9 +65,15 @@
     (reset! bird (make-bird! bird-type))
     (swap! bird-queue next)))
 
+
+
+
 (defn setup-world!
   []
   (create-world!)
+  ;; establish world scale
+  (reset! world-width (* base-world-width (:world-scale @scene)))
+  (reset! world-height (/ @world-width aspect-ratio))
   (reset! pigs #{})
   (reset! bird nil)
   (reset! bird-queue (:birds @scene))
@@ -88,10 +95,10 @@
                 [0 0])
           fixt-attr (get materials type)
           shp (case (:shape obj)
-                :circle (circle (/ (:radius obj) world-to-px-scale))
+                :circle (circle (/ (:radius obj) (world-to-px-scale)))
                 :box (let [[w-px h-px] (:wh obj)
-                           w (/ w-px world-to-px-scale)
-                           h (/ h-px world-to-px-scale)]
+                           w (/ w-px (world-to-px-scale))
+                           h (/ h-px (world-to-px-scale))]
                        (box (/ w 2) (/ h 2)))
                 :poly (polygon (map px-to-world (reverse (:coords obj))))
                 :polyline (poly-edges (map px-to-world (:coords obj))
@@ -153,19 +160,17 @@
                                           10.0)
         ang (first (shuffle angs))
         flight (calculate-flight-time @focus-world target-pt
-                                      launch-speed 10.0 ang)]
+                                      launch-speed 10.0 ang)
+        ;; to match up to Angry Birds
+        adj-flight (* flight 0.7)]
     (println "chose angle" ang "with flight time" flight)
     {:angle ang
      :flight flight
-     :tap-t (* flight 0.85)
+     :tap-t (* adj-flight (if (> ang (/ PI 4)) 0.9 0.8))
      :target-body pig}))
 
 (defn simulate-for
   [dur]
   (let [start-t @world-time]
-    (loop [i 0]
-      (if (< @world-time (+ start-t dur))
-        (do
-          (step! (/ 1.0 15.0))
-          (recur (inc i)))
-        (println "i =" i)))))
+    (while (< @world-time (+ start-t dur))
+      (step! (/ 1.0 20.0)))))

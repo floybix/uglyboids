@@ -1,13 +1,14 @@
 (ns uglyboids.vision
-  (use [uglyboids.vision params floodfill shape-detection]
-       uglyboids.physics-params
-       seesaw.core
-       seesaw.graphics)
-  (import [java.io File]
-          [java.awt Dimension Color Graphics]
-          [java.awt.image BufferedImage]
-          [javax.imageio ImageIO]
-          [javax.swing JFrame JPanel]))
+  (:gen-class)
+  (:use (uglyboids.vision params floodfill shape-detection)
+        uglyboids.physics-params
+        seesaw.core
+        seesaw.graphics)
+  (:import (java.io File)
+           (java.awt Dimension Color Graphics)
+           (java.awt.image BufferedImage)
+           (javax.imageio ImageIO)
+           (javax.swing JFrame JPanel)))
 
 ;; ## debugging stuff
 
@@ -261,6 +262,7 @@
 (defn scene-from-shapes
   [shapes]
   ;; TODO: check for success screen
+  ;; check for level failed screen (big pig)
   (if (some (fn [s]
               (when (= (:type s) :pig)
                 (let [[x-lo x-hi] (:x-range s)
@@ -270,54 +272,64 @@
                   (when (>= span 90) true))))
             shapes)
     {:state :failed}
-    (let [sling-like (filter (fn [s]
-                               (and (= (:type s) :static-wood)
-                                    (let [height (abs (apply - (:y-range s)))]
-                                      (> height 60))))
-                             shapes)
-          sling (when (seq sling-like)
-                  (apply min-key #(first (:mid-pt %)) sling-like))
-          focus-pt (when sling [(first (:mid-pt sling))
-                                (+ 10 (first (:y-range sling)))])
-          birds (filter #(bird-types (:type %)) shapes)
-          ;; alternative method to find focus point: the highest bird
-          focus-pt (if (or (nil? sling)
-                           (let [span (abs (apply - (:x-range sling)))]
-                             (> span 33)))
-                     (min-key first (map :mid-pt birds))
-                     focus-pt)
-          ;; order by distance from slingshot
-          bird-order (sort-by (fn [s]
-                                (let [pos (:pos @(:geom s))]
-                                  (abs (- (first pos) (first focus-pt)))))
-                              birds)
-          ;; get rid of any mess around sling as can interfere with birds
-          sling-mess (filter (fn [s]
-                               (let [[x-lo x-hi] (:x-range s)
-                                     [y-lo y-hi] (:y-range s)]
-                                 (and (<= (- x-lo 10) (first focus-pt) (+ x-hi 10))
-                                      (<= (- y-lo 10) (second focus-pt) (+ y-hi 10)))))
-                             shapes)
-          pigs (filter #(= (:type %) :pig) shapes)
-          special-ids (set (map :id (concat birds sling-mess)))
-          normal-shapes (remove #(special-ids (:id %)) shapes)
-          objs (mapcat (fn [s]
-                         (let [otype (:type s)
-                               type (if (#{:static-wood :static-surface :ground} otype)
-                                      :static otype)]
-                           (if (= otype :static-surface)
-                             (for [geom-i (flatten (list @(:geom s)))]
-                               {:type :static, :shape :polyline
-                                :coords (:coords geom-i)})
-                             (list (assoc @(:geom s) :type type)))))
-                       normal-shapes)
-          ]
-      {:state (cond (zero? (count pigs)) :success
-                    (zero? (count birds)) :failed
-                    :else :in-play)
-       :start focus-pt
-       :birds (map :type bird-order)
-       :objs objs})))
+    (let [all-birds (filter #(bird-types (:type %)) shapes)
+          ;; birds can remain to right of screen after landing
+          birds (filter #(< (first (:mid-pt %))
+                            (/ px-width 3))
+                        all-birds)
+          pigs (filter #(= (:type %) :pig) shapes)]
+      (if (zero? (count pigs))
+        {:state :success}
+        (if (zero? (count birds))
+          {:state :failed}
+          ;; have pigs and birds, so in-play
+          ;; method to find focus point: the highest bird
+          (let [launch-bird (apply min-key #(second (:mid-pt %)) birds)
+                focus-pt (if (= (:type launch-bird) :red-bird)
+                           (mapv + (:mid-pt launch-bird) [0 6])
+                           (:mid-pt launch-bird))
+                ;; order by distance from slingshot
+                bird-order (sort-by (fn [s]
+                                      (let [pos (:pos @(:geom s))]
+                                        (abs (- (first pos) (first focus-pt)))))
+                                    birds)
+                ;; get rid of any objects around sling as can interfere with birds
+                sling-stuff (filter (fn [s]
+                                     (let [[x-lo x-hi] (:x-range s)
+                                           [y-lo y-hi] (:y-range s)]
+                                       (and (<= (- x-lo 20) (first focus-pt) (+ x-hi 20))
+                                            (<= (- y-lo 20) (second focus-pt) (+ y-hi 20)))))
+                                    shapes)
+                ;; find slingshot - this is a standard to detect world scale
+                ;; level 1-1 has large slingshot (small world) vs level 1-3
+                sling (some (fn [s]
+                              (and (= (:type s) :static-wood)
+                                   (let [height (abs (apply - (:y-range s)))]
+                                     (when (> height 40) s))))
+                            sling-stuff)
+                sling-width (when sling
+                              (let [span (abs (apply - (:x-range sling)))]
+                                (when (<= 20 span 40) (max 25 span))))
+                world-scale (if sling-width (/ 30.0 sling-width) 1.0)
+                special-ids (set (map :id (concat all-birds sling-stuff)))
+                normal-shapes (remove #(special-ids (:id %)) shapes)
+                objs (mapcat (fn [s]
+                               (let [otype (:type s)
+                                     type (if (#{:static-wood :static-surface :ground} otype)
+                                            :static otype)]
+                                 (if (= otype :static-surface)
+                                   (for [geom-i (flatten (list @(:geom s)))]
+                                     {:type :static, :shape :polyline
+                                      :coords (:coords geom-i)})
+                                   (list (assoc @(:geom s) :type type)))))
+                             normal-shapes)]
+            (println "focus point:" focus-pt "sling-width:" sling-width
+                     "scale:" world-scale)
+            {:state :in-play
+             :world-scale world-scale
+             :start focus-pt
+             :birds (map :type bird-order)
+             :objs objs}))))))
 
 (defn paint
   [c g]

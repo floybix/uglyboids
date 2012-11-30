@@ -1,4 +1,5 @@
 (ns uglyboids.client
+  (:gen-class)
   (:import (ab.framework.ai ClientActionRobot)
            (ab.framework.other Shot)
            (ab.framework.player Configuration)
@@ -7,8 +8,6 @@
         uglyboids.physics-params
         [uglyboids.vision :only [scene-from-image-file]]
         [cljbox2d.vec2d :only [TWOPI PI in-pi-pi polar-xy]]))
-
-;(def robot (atom nil))
 
 (def env-path "vision/Matlab/")
 
@@ -24,7 +23,7 @@
   [robot shots]
   (let [al (ArrayList.)
         [x0-px y0-px] (world-to-px @focus-world)
-        mag-px (min 180 (- x0-px 10))]
+        mag-px 100]
     (doseq [shot shots
             :let [ang (:angle shot)
                   tap (:tap-t shot)
@@ -61,7 +60,10 @@
           (println "naively choosing a shot...")
           (let [shot (choose-shot)]
             (println "estimating effects...")
-            (simulate-shot! shot)
+            (try
+              (let [foo (future (simulate-shot! shot))]
+                (deref foo 1000 nil))
+              (catch Exception e (println (.getMessage e))))
             (do-shots! robot [shot])
             true))
         ;; end state

@@ -6,6 +6,8 @@
   * adjust shapes to stability
   * basic taps (just before impact)
 * send for compatability testing
+  * robot/configure /getConfiguration name?
+
 
 ## Vision ##
 

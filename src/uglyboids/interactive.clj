@@ -1,4 +1,5 @@
 (ns uglyboids.interactive
+  (:gen-class)
   (:use uglyboids.core
         uglyboids.physics-params
         cljbox2d.core
@@ -12,9 +13,6 @@
             uglyboids.levels.level-1-2))
 
 (def aiming? (atom false))
-
-(reset! camera
-        {:width world-width :height world-height :x-left 0 :y-bottom 0})
 
 (defn my-key-press []
   (case (quil/raw-key)
@@ -56,6 +54,8 @@
   (quil/frame-rate (/ 1 *timestep*))
   (println "building world...")
   (setup-world!)
+  (reset! camera
+          {:width @world-width :height @world-height :x-left 0 :y-bottom 0})
   (reset! draw-more-fn draw-more))
 
 (defn -main
@@ -75,4 +75,4 @@
     :mouse-pressed my-mouse-pressed
     :mouse-released my-mouse-released
     :mouse-dragged my-mouse-dragged
-    :size [(/ px-width 2) (/ px-height 2)]))
+    :size [px-width px-height]))
