@@ -17,7 +17,7 @@
 (defn my-key-press []
   (case (quil/raw-key)
     \n (next-bird!)
-    \r (setup-world!)
+    \r (setup-world! @scene)
     \s (let [shot (choose-shot)]
          (wake! (:target-body shot))
          (shoot! (:angle shot)))
@@ -53,7 +53,7 @@
 (defn setup []
   (quil/frame-rate (/ 1 *timestep*))
   (println "building world...")
-  (setup-world!)
+  ;(setup-world!)
   (reset! camera
           {:width @world-width :height @world-height :x-left 0 :y-bottom 0})
   (reset! draw-more-fn draw-more))
@@ -61,12 +61,12 @@
 (defn -main
   "Run the sketch."
   [& args]
-  (reset! scene
-          (if-let [screenshot (first args)]
-            (uglyboids.vision/scene-from-image-file screenshot)
-            ;; default
-            uglyboids.levels.level-1-2/level))
-        
+  (let [load-scene (if-let [screenshot (first args)]
+                     (uglyboids.vision/scene-from-image-file screenshot)
+                     ;; default
+                     uglyboids.levels.level-1-2/level)]
+    (reset! scene load-scene)
+    (setup-world! load-scene))
   (quil/defsketch the-sketch
     :title "Ugly boids"
     :setup setup

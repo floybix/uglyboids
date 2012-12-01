@@ -27,7 +27,7 @@
   {:static {:density 1}
    :wood {:density 1}
    :glass {:density 1}
-   :stone {:density 6}
+   :stone {:density 25}
    :pig {:density 2}
    })
 

@@ -11,13 +11,16 @@
 
 (def env-path "vision/Matlab/")
 
+(.mkdirs (java.io.File. env-path))
+
 (def shots-left (atom -1))
 
 (defn scene-snapshot!
   [robot]
   (.screenShot robot "im.png")
   (let [new-scene (scene-from-image-file (str env-path "im.png"))]
-    (reset! scene new-scene)))
+    (reset! scene new-scene)
+    new-scene))
 
 (defn do-shots!
   [robot shots]
@@ -49,14 +52,12 @@
       (.finishRun robot)
       (println "no shots left")
       false)
-    (do
-      (scene-snapshot! robot)
-      (if (= (:state @scene) :in-play)
+    (let [new-scene (scene-snapshot! robot)]
+      (if (= (:state new-scene) :in-play)
         (do
           (println "building world...")
-          (setup-world!)
-          (when (neg? @shots-left)
-            (reset! shots-left (count (:birds scene))))
+          (setup-world! new-scene)
+          (reset! shots-left (count (:birds new-scene)))
           (println "naively choosing a shot...")
           (let [shot (choose-shot)]
             (println "estimating effects...")
@@ -69,24 +70,29 @@
         ;; end state
         (do
           (.finishRun robot)
-          (println "level ended:" (:state @scene))
+          (println "level ended:" (:state new-scene))
           false)))))
 
 (defn -main
   [& args]
   (let [serverip (if (seq args) (first args) "localhost")
-        robot (ClientActionRobot. (into-array [serverip]))]
+        robot (ClientActionRobot. (into-array [serverip]))
+        start-level (if (>= 2 (count (seq args))) (second args) -1)]
     ;; TODO - how to pass in team id?
     (.configure robot)
-    (.loadLevel robot (int-array [1]))
+    (try
+      (println "requesting to load level" start-level)
+      (.loadLevel robot (int-array [start-level]))
+      (catch Exception e (println (.getMessage e))))
     (loop [i 0]
       (if (bangbangbang! robot)
         ;; keep going
         (recur (inc i))
         ;; level finished
         (let [conf (.getConfiguration robot)
+              max-level (.getMax_level conf)
               ;;(.nextLevel robot)
-              new-ok? (.loadLevel robot (int-array (.getMax_level conf)))]
+              new-ok? (.loadLevel robot (int-array [max-level]))]
           (println "configuration: " conf)
           (if new-ok?
             (do
@@ -95,6 +101,6 @@
               (recur (inc i)))
             ;; finish up
             (do
-              (println "next level command failed, exiting.")
+              (println "next level command refused, exiting.")
               (println (.getConfiguration robot))
               (.finishPlay robot))))))))

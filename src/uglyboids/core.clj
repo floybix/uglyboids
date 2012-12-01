@@ -69,15 +69,15 @@
 
 
 (defn setup-world!
-  []
+  [scene]
   (create-world!)
   ;; establish world scale
-  (reset! world-width (* base-world-width (:world-scale @scene)))
+  (reset! world-width (* base-world-width (:world-scale scene)))
   (reset! world-height (/ @world-width aspect-ratio))
   (reset! pigs #{})
   (reset! bird nil)
-  (reset! bird-queue (:birds @scene))
-  (reset! focus-world (px-to-world (:start @scene)))
+  (reset! bird-queue (:birds scene))
+  (reset! focus-world (px-to-world (:start scene)))
   ;; note, Box2D requires vertices in counter-clockwise (angle increasing) order
   ;; however, the pixel y scale is flipped relative to world y scale, so reverse!
   (reset! ground-body
@@ -87,7 +87,7 @@
                                                       [0 ground-level]
                                                       [px-width ground-level]
                                                       [px-width px-height]))))}))
-  (doseq [obj (:objs @scene)]
+  (doseq [obj (:objs scene)]
     (let [type (:type obj)
           bodytype (if (= type :static) :static :dynamic)
           pos (if (:pos obj)
@@ -166,7 +166,7 @@
     (println "chose angle" ang "with flight time" flight)
     {:angle ang
      :flight flight
-     :tap-t (* adj-flight (if (> ang (/ PI 4)) 0.9 0.8))
+     :tap-t (* adj-flight (if (> ang (/ PI 4)) 0.9 0.85))
      :target-body pig}))
 
 (defn simulate-for

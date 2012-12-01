@@ -285,20 +285,20 @@
           ;; have pigs and birds, so in-play
           ;; method to find focus point: the highest bird
           (let [launch-bird (apply min-key #(second (:mid-pt %)) birds)
-                focus-pt (if (= (:type launch-bird) :red-bird)
+                launch-pt (if (= (:type launch-bird) :red-bird)
                            (mapv + (:mid-pt launch-bird) [0 6])
                            (:mid-pt launch-bird))
                 ;; order by distance from slingshot
                 bird-order (sort-by (fn [s]
                                       (let [pos (:pos @(:geom s))]
-                                        (abs (- (first pos) (first focus-pt)))))
+                                        (abs (- (first pos) (first launch-pt)))))
                                     birds)
                 ;; get rid of any objects around sling as can interfere with birds
                 sling-stuff (filter (fn [s]
                                      (let [[x-lo x-hi] (:x-range s)
                                            [y-lo y-hi] (:y-range s)]
-                                       (and (<= (- x-lo 20) (first focus-pt) (+ x-hi 20))
-                                            (<= (- y-lo 20) (second focus-pt) (+ y-hi 20)))))
+                                       (and (<= (- x-lo 20) (first launch-pt) (+ x-hi 20))
+                                            (<= (- y-lo 20) (second launch-pt) (+ y-hi 20)))))
                                     shapes)
                 ;; find slingshot - this is a standard to detect world scale
                 ;; level 1-1 has large slingshot (small world) vs level 1-3
@@ -311,6 +311,13 @@
                               (let [span (abs (apply - (:x-range sling)))]
                                 (when (<= 20 span 40) (max 25 span))))
                 world-scale (if sling-width (/ 30.0 sling-width) 1.0)
+                ;; more consistent: set focus point relative to sling top
+                focus-pt (if sling-width
+                           (let [sling-top [(first (:mid-pt sling))
+                                            (first (:y-range sling))]
+                                 descent (int (Math/round (* 16 world-scale)))]
+                             (mapv + sling-top [0 descent]))
+                           launch-pt)
                 special-ids (set (map :id (concat all-birds sling-stuff)))
                 normal-shapes (remove #(special-ids (:id %)) shapes)
                 objs (mapcat (fn [s]
@@ -323,8 +330,8 @@
                                       :coords (:coords geom-i)})
                                    (list (assoc @(:geom s) :type type)))))
                              normal-shapes)]
-            (println "focus point:" focus-pt "sling-width:" sling-width
-                     "scale:" world-scale)
+            (println "focus pt:" focus-pt " launch pt:" launch-pt
+                     "sling-width:" sling-width "scale:" world-scale)
             {:state :in-play
              :world-scale world-scale
              :start focus-pt
