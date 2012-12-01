@@ -2,7 +2,6 @@
   (:use cljbox2d.core
         [cljbox2d.vec2d :only [TWOPI PI in-pi-pi
                                v-mag v-angle v-sub polar-xy]]
-        ;[uglyboids.vision :only []]
         uglyboids.physics-params))
 
 (def scene (atom nil))
@@ -47,9 +46,12 @@
 (defn make-bird!
   [bird-type]
   (let [attr (bird-type bird-attrs)
-        radius (/ (:radius attr) (world-to-px-scale))
+        radius (:radius attr)
+        udata {:type bird-type
+               :rgb (:rgb attr)}
         bod (body! {:position @focus-world
-                    :bullet true}
+                    :bullet true
+                    :user-data udata}
                    {:shape (circle radius)
                     :density (:density attr)
                     :restitution (:restitution attr)})]
@@ -68,6 +70,7 @@
 
 
 
+
 (defn setup-world!
   [scene]
   (create-world!)
@@ -81,7 +84,8 @@
   ;; note, Box2D requires vertices in counter-clockwise (angle increasing) order
   ;; however, the pixel y scale is flipped relative to world y scale, so reverse!
   (reset! ground-body
-          (body! {:type :static}
+          (body! {:type :static
+                  :user-data {:type :ground}}
                  {:shape (polygon (map px-to-world
                                        (reverse (list [0 px-height]
                                                       [0 ground-level]
@@ -104,10 +108,10 @@
                 :polyline (poly-edges (map px-to-world (:coords obj))
                                       fixt-attr))
           body-attr {:type bodytype
+                     :user-data {:type type :rgb (:rgb obj)}
                      :position pos
                      :linear-damping linear-damping
-                     :angular-damping angular-damping
-                     :user-data {:type type}}
+                     :angular-damping angular-damping}
           bod (if (= (:shape obj) :polyline)
                 (apply body! body-attr shp)
                 (body! body-attr (merge {:shape shp} fixt-attr)))]

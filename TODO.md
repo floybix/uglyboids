@@ -57,3 +57,4 @@
 * can scale of world vary?
   * use size of slingshot as scale factor for world?
 * need to destroy World when creating a new one to avoid overflow?
+* --debug flag to show whole sequence

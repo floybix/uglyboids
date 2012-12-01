@@ -13,15 +13,21 @@
 
 ;; note radius is in pixels
 (def bird-attrs
-  {:red-bird {:radius 7
+  {:red-bird {:radius 0.56
+              :radius-px 7
               :density 5
-              :restitution 0.4}
-   :blue-bird {:radius 4
+              :restitution 0.4
+              :rgb [214 0 45]}
+   :blue-bird {:radius 0.32
+               :radius-px 4
                :density 5
-               :restitution 0.4}
-   :yellow-bird {:radius 10
+               :restitution 0.4
+               :rgb [99 170 197]}
+   :yellow-bird {:radius 0.80
+                 :radius-px 10
                  :density 5
-                 :restitution 0.2}})
+                 :restitution 0.2
+                 :rgb [241 219 32]}})
 
 (def materials
   {:static {:density 1}
