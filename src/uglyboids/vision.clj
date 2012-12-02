@@ -269,7 +269,8 @@
                           (let [g1 @(:geom one)
                                 sh (:shape g1)
                                 cc (:coords g1)]
-                            (if (= sh :circle) ;; TODO - skip for now
+                            (if (or (= sh :circle) ;; TODO - skip for now
+                                    (<= (count cc) 1))
                               (recur (next others) shape)
                               ;; ok, go: check each of the vertices
                               (let [new-lo (snap-vertices-to-other-shape low-verts cc fuzz *debug*)

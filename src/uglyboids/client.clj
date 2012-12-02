@@ -10,7 +10,6 @@
         [cljbox2d.vec2d :only [TWOPI PI in-pi-pi polar-xy]]))
 
 (def env-path "vision/Matlab/")
-
 (.mkdirs (java.io.File. env-path))
 
 (def shots-left (atom -1))
@@ -77,30 +76,28 @@
   [& args]
   (let [serverip (if (seq args) (first args) "localhost")
         robot (ClientActionRobot. (into-array [serverip]))
-        start-level (if (>= 2 (count (seq args))) (second args) -1)]
-    ;; TODO - how to pass in team id?
-    (.configure robot)
+        start-level -1]
+    (.configure robot "Zonino")
     (try
       (println "requesting to load level" start-level)
-      (.loadLevel robot (int-array [start-level]))
+      (.loadALevel robot start-level)
       (catch Exception e (println (.getMessage e))))
     (loop [i 0]
       (if (bangbangbang! robot)
         ;; keep going
         (recur (inc i))
         ;; level finished
-        (let [conf (.getConfiguration robot)
+        (let [conf (.getConfiguration robot "Zonino")
               max-level (.getMax_level conf)
-              ;;(.nextLevel robot)
               new-ok? (.loadLevel robot (int-array [max-level]))]
           (println "configuration: " conf)
           (if new-ok?
             (do
               (reset! shots-left -1)
-              (println "next level command ok.")
+              (println "load level command ok.")
               (recur (inc i)))
             ;; finish up
             (do
-              (println "next level command refused, exiting.")
-              (println (.getConfiguration robot))
+              (println "load level command refused, exiting.")
+              (println (.getConfiguration robot "Zonino"))
               (.finishPlay robot))))))))

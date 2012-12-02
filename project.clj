@@ -5,8 +5,8 @@
   :license {:name "Eclipse Public License"
             :url "http://www.eclipse.org/legal/epl-v10.html"}
   :dependencies [[cljbox2d "0.2.0-SNAPSHOT"]
-                 [ab.framework/client "1.1s"]
                  [seesaw "1.4.2"]
                  [org.clojure/clojure "1.4.0"]]
+  :java-source-paths ["java-src"]
   :main uglyboids.client
   :aot [uglyboids.client uglyboids.vision uglyboids.interactive])

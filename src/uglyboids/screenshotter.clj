@@ -2,14 +2,13 @@
   (:import (ab.framework.ai ClientActionRobot)
            (ab.framework.player Configuration)))
 
-;; need to run like this:
+;; need to run like this for readline to work:
 ;; lein trampoline run -m uglyboids.screenshotter
 
 (defn -main
   [& args]
   (let [serverip (if (seq args) (first args) "localhost")
         robot (ClientActionRobot. (into-array [serverip]))]
-    (.configure robot)
     (loop [i 0]
         (println)
         (print "level number for screenshot (x-y): ")

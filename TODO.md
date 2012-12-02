@@ -1,6 +1,7 @@
 
 ## Priorities ##
 
+* version 1.2s issues
 * impact effects
 * estimate pigs killed
 * ROBUSTIFY - various levels of detail
