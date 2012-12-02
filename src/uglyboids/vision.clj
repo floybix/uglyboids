@@ -19,7 +19,6 @@
 
 (def display-img (atom nil))
 (def the-frame (atom nil))
-(def -blobs (atom nil))
 
 ;; pixel ranges within which to look for shapes
 (def min-x 5)
@@ -130,7 +129,7 @@
                     :pos mid-pt}
       :pig {:shape :circle
             :radius (quot (max (- x-hi x-lo) (- y-hi y-lo)) 2)
-            :pos mid-pt}
+            :pos (v-add mid-pt [0 -1])} ;; dodge overlaps
       :static-surface (shape-from-coords coords false x-range y-range ground-level)
       :static-wood (shape-from-coords coords true x-range y-range ground-level)
       ;; else - dynamic blocks
@@ -211,9 +210,9 @@
         blobs))))
 
 (defn draw-shapes!
-  [blobs]
+  [blobs col]
   (let [g (.getGraphics ^BufferedImage @display-img)
-        sty (style :foreground Color/YELLOW)]
+        sty (style :foreground col)]
     (doseq [blob blobs
             :let [type (:type blob)
                   geom @(:geom blob)
@@ -230,10 +229,9 @@
 
 (defn adjust-shapes
   [shapes fuzz]
-  (dbg "ADJUSTING SHAPES")
   ;; loop through shapes sorted by bottom position going upwards.
   ;; REMEMBER: higher y coordinates are further "down" in the world!
-  ;; TODO: would be a bit cleaner if went through and deref'd all the :geoms first
+  ;; this would be a bit cleaner if went through and deref'd all the :geoms first
   (loop [upward (sort-by #(- (second (:y-range %)))
                          shapes)
          downward []]
@@ -242,33 +240,22 @@
             [x-lo x-hi] (:x-range shape)
             [y-lo y-hi] (:y-range shape)
             x-span (- x-hi x-lo)
-            ;; initial filter only based on bounding box
-            ;; NOTE: we will only adjust down to objects with larger x-span
-            ;; NOTE: this is an approximation, bounding box won't get all candidates
-            below (filter (fn [s]
-                            (let [[s-x-lo s-x-hi] (:x-range s)
-                                  [s-y-lo s-y-hi] (:y-range s)
-                                  s-x-span (- s-x-hi s-x-lo)]
-                              (and (>= s-x-hi x-lo) ;; not off to left
-                                   (<= s-x-lo x-hi) ;; not off to right
-                                   (>= s-x-span x-span) ;; wider than current
-                                   (<= (abs (- s-y-lo y-hi)) fuzz)))) ;; not far below
-                          downward)
-            above (filter (fn [s]
-                            (let [[s-x-lo s-x-hi] (:x-range s)
-                                  [s-y-lo s-y-hi] (:y-range s)
-                                  s-x-span (- s-x-hi s-x-lo)]
-                              (and (>= s-x-hi x-lo) ;; not off to left
-                                   (<= s-x-lo x-hi) ;; not off to right
-                                   (>= s-x-span x-span) ;; wider than current
-                                   (<= (abs (- y-lo s-y-hi)) fuzz)))) ;; not far above
-                          (next upward))
-            ;; for each 'below' object,
+            ;; initial filter only based on x range
+            ;; NOTE: we will only adjust (down/up) to objects with larger x-span
+            others (filter (fn [s]
+                             (let [[s-x-lo s-x-hi] (:x-range s)
+                                   [s-y-lo s-y-hi] (:y-range s)
+                                   s-x-span (- s-x-hi s-x-lo)]
+                               (and (>= s-x-hi x-lo) ;; not off to left
+                                    (<= s-x-lo x-hi) ;; not off to right
+                                    (>= s-x-span x-span)))) ;; wider than current
+                           (concat downward (next upward)))
+            ;; for each other object,
             ;;   for each of the two lowest vertices of 'shape'
             ;;     find the top edge below (closest vertex, and opposite closest)
             ;;     intersect vertex with the edge straight down
-            ;;     if drop < threshold, modify our coordinates (don't bother with bounds)
-            ;; similarly for wider shapes above, pull our top vertices up
+            ;;     if shift < threshold, modify our coordinates (don't bother about bounds)
+            ;;   similarly for the two highest vertices of 'shape'
             geom @(:geom shape)
             low-verts (if (= :circle (:shape geom))
                         (list (v-add (:pos geom) [0 (:radius geom)]))
@@ -276,65 +263,35 @@
             high-verts (if (= :circle (:shape geom))
                          (list (v-add (:pos geom) [0 (- (:radius geom))]))
                          (take 2 (sort-by #(second %) (:coords geom))))
-            shape-adj (loop [others (reverse below) ;; closest first
+            shape-adj (loop [others others
                              shape shape]
                         (if-let [one (first others)]
-                          ;; TODO - static surface is a list of geoms
-                          (if (= (:type one) :static-surface)
-                            (recur (next others) shape)
-                            (let [g1 @(:geom one)
-                                  sh (:shape g1)
-                                  cc (:coords g1)]
-                              (if (= sh :circle) ;; TODO - skip for now
-                                (recur (next others) shape)
-                                ;; ok, go: check each of the low-verts
-                                (let [new-lo (snap-vertices-to-other-shape low-verts cc fuzz *debug*)]
-                                  ;; update vertices in shape
-                                  (let [old-with-new (zipmap low-verts new-lo)
-                                        new-geom (if (= :circle (:shape geom))
-                                                   (let [[_ o-y] (first low-verts)
-                                                         [_ n-y] (first new-lo)
-                                                         shift (- n-y o-y)]
-                                                     (update-in geom [:pos] v-add [0 shift]))
-                                                   (update-in geom [:coords] #(replace old-with-new %)))]
-                                    (recur (next others)
-                                           (assoc shape :geom (atom new-geom))))))))
+                          (let [g1 @(:geom one)
+                                sh (:shape g1)
+                                cc (:coords g1)]
+                            (if (= sh :circle) ;; TODO - skip for now
+                              (recur (next others) shape)
+                              ;; ok, go: check each of the vertices
+                              (let [new-lo (snap-vertices-to-other-shape low-verts cc fuzz *debug*)
+                                    new-hi (snap-vertices-to-other-shape high-verts cc fuzz *debug*)]
+                                ;; update vertices in shape
+                                (let [old-with-new (merge (zipmap high-verts new-hi)
+                                                          (zipmap low-verts new-lo))
+                                      new-geom (if (= :circle (:shape geom)) ;; TODO: shift up / expand?
+                                                 (let [[_ o-y] (first low-verts)
+                                                       [_ n-y] (first new-lo)
+                                                       shift (- n-y o-y)]
+                                                   (update-in geom [:pos] v-add [0 shift]))
+                                                 (update-in geom [:coords] #(replace old-with-new %)))]
+                                  (recur (next others)
+                                         (assoc shape :geom (atom new-geom)))))))
                           ;; done
-                          shape))
-            shape-adj (loop [others above ;; closest first
-                             shape shape-adj]
-                        (if-let [one (first others)]
-                          ;; TODO - static surface is a list of geoms
-                          (if (= (:type one) :static-surface)
-                            (recur (next others) shape)
-                            (let [g1 @(:geom one)
-                                  sh (:shape g1)
-                                  cc (:coords g1)]
-                              (if (= sh :circle) ;; TODO - skip for now
-                                (recur (next others) shape)
-                                ;; ok, go: check each of the high-verts
-                                (let [new-hi (snap-vertices-to-other-shape high-verts cc fuzz *debug*)]
-                                  ;; update vertices in shape
-                                  (let [old-with-new (zipmap high-verts new-hi)
-                                        new-geom (if (= :circle (:shape geom))
-                                                   (let [[_ o-y] (first high-verts)
-                                                         [_ n-y] (first new-hi)
-                                                         shift (- n-y o-y)]
-                                                     (update-in geom [:pos] v-add [0 shift]))
-                                                   (update-in geom [:coords] #(replace old-with-new %)))]
-                                    (recur (next others)
-                                           (assoc shape :geom (atom new-geom))))))))
-                          ;; done
-                          shape))
-            ;; TODO: if nothing below, test ground level
-            ]
+                          shape))]
         (dbg {:type (:type shape)
               :x-range (:x-range shape)
               :y-range (:y-range shape)
-              :below (map :type below)
-              :above (map :type above)})
-        ;(dbg "low-verts: " low-verts)
-        ;(dbg "adj-geom: " (:geom shape-adj))
+              :n-candidates (count others)
+              :candidates (map :type others)})
         (recur (next upward) (conj downward shape-adj)))
       ;; finished
       downward)))
@@ -444,10 +401,13 @@
   (println "scanning image for shapes...")
   (let [blobs (identify-shapes img)]
     (when *debug*
-      (reset! -blobs blobs)
       (println "drawing shapes...")
-      (draw-shapes! blobs))
+      (draw-shapes! blobs Color/WHITE))
+    (println "adjusting shapes...")
     (let [adj-shapes (adjust-shapes blobs 6)]
+      (when *debug*
+        (println "drawing adjusted shapes...")
+        (draw-shapes! adj-shapes Color/YELLOW))
       (println "converting to scene...")
       (scene-from-shapes adj-shapes))))
 

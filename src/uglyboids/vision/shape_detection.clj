@@ -473,11 +473,7 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
         (if p2
           (if (collinear? p0 p1 p2 angle-tol)
             (recur (next more) vtx)
-            (do
-              ;(swank.core/break)
-              ;; add both new points
-              (recur (nnext more) (conj (conj vtx p1) p2)))
-            )
+            (recur (next more) (conj vtx p1)))
           vtx)))))
 
 (defn snap-horizontals
