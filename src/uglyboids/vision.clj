@@ -24,7 +24,7 @@
 (def min-x 5)
 (def max-x (- px-width 10))
 (def min-y 150)
-(def max-y (- ground-level 2))
+(def max-y (- ground-level 1))
 
 ;; for tracking assignment of pixels to shapes
 (def cells (vec (for [y (range 0 px-height)]
@@ -128,7 +128,7 @@
                     :radius (:radius-px (:yellow-bird bird-attrs))
                     :pos mid-pt}
       :pig {:shape :circle
-            :radius (quot (max (- x-hi x-lo) (- y-hi y-lo)) 2)
+            :radius (dec (quot (max (- x-hi x-lo) (- y-hi y-lo)) 2))
             :pos (v-add mid-pt [0 -1])} ;; dodge overlaps
       :static-surface (shape-from-coords coords false x-range y-range ground-level)
       :static-wood (shape-from-coords coords true x-range y-range ground-level)

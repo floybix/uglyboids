@@ -229,9 +229,30 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
   [coll]
   (partition 3 1 (concat (take-last 1 coll) coll (take 1 coll))))
 
+(defn backward-pairs-wrapped
+  [coll]
+  (partition 2 1 (concat (take-last 1 coll) coll)))
+
 (defn median
   [coll]
-  (nth (sort coll) (quot (count coll) 2)))
+  (let [n (count coll)
+        i (quot (dec n) 2)]
+    (if (<= n 1)
+      (first coll)
+      (let [scoll (sort coll)]
+        (if (odd? n)
+          (nth scoll i)
+          ;; average middle two:
+          (let [[x1 x2] (take 2 (drop i scoll))]
+            (/ (+ x1 x2) 2)))))))
+
+(defn median-angle
+  [angs]
+  ;; correct for discontinuity at -pi/+pi
+  (let [angs* (if (> (median (map abs angs)) (* 0.8 PI))
+                (map #(if (neg? %) (+ % TWOPI) %) angs)
+                angs)]
+    (in-pi-pi (median angs*))))
 
 (defn v-avg
   [pts]
@@ -336,7 +357,6 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
               (recur (next vv) (conj n-vv v))))))
       n-vv)))
 
-
 (defn find-vertices-tri-quad
   [edge-pts cent-pt]
   (let [n-segments 24
@@ -344,70 +364,68 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
         segx (segment-extrema edge-pts cent-pt n-segments
                               :maxima-only? true)
         n-segs-ok (count (filter seq segx))]
-    (if (<= n-segs-ok (quot n-segments 2))
+    (if (<= n-segs-ok (quot n-segments 3))
       ;; should not happen, but return:
       nil
       (let [;; collapse to a flat sequence of polar points (from segments)
             all-pp (apply concat segx)
-            ;; find index of single closest point (TODO: use reduce?)
+            ;; find index of single closest point
             i0 (apply min-key (fn [i] (:mag (nth all-pp i)))
                       (range (count all-pp)))
-            ;; start from closest point, for orientation
+            ;; rotate points sequence to start from closest point
             pp (concat (drop i0 all-pp) (take i0 all-pp))
             ;; convert back to local rectangular coordinates (cent)
             pts (map (fn [{:keys [mag ang]}] (polar-xy mag ang)) pp)
             n (count pts)
             ;; find index of point in opposite direction
+            near-pt (first pts)
             near-dir (:ang (first pp))
             i-opp (apply max-key
                          (fn [i] (abs (in-pi-pi (- near-dir (:ang (nth pp i))))))
                          (range 3 (- n 2)))
+            near-opp-pt (nth pts i-opp)
+            ;; find index of single furthest point
+            iz (apply max-key (fn [i] (:mag (nth pp i)))
+                      (range (count pp)))
+            ;; rotate points sequence to start from furthest point
+            pp-z (concat (drop iz pp) (take iz pp))
+            pts-z (concat (drop iz pts) (take iz pts))
+            far-pt (first pts-z)
+            far-dir (:ang (first pp-z))
+
+            ;; estimate angle of surface at closest point
+            angs (map (fn [[p0 p1]] (v-angle (v-sub p1 p0)))
+                      (backward-pairs-wrapped pts))
             ;; find angles between pairs of points, skipping over one
             angs-skip1 (map (fn [[p0 p1 p2]] (v-angle (v-sub p2 p0)))
                             (triples-wrapped pts))
             ;; angle between the points around closest point
             ;angle-0 (v-angle (v-sub (second pts) (last pts)))
-            angs-0-raw (concat (take-last 1 angs-skip1)
-                               (take 2 angs-skip1))
-            ;; correct for discontinuity at -pi/+pi
-            angs-0 (if (> (median (map abs angs-0-raw)) (* 0.8 PI))
-                          (map #(if (neg? %) (+ % TWOPI) %) angs-0-raw)
-                          angs-0-raw)
-            angle-0 (in-pi-pi (median angs-0))
+            angs-near (concat ;(take-last 1 angs-skip1)
+                           (take 1 angs-skip1);2 angs-skip1)
+                           (take 2 angs))
+            angle-near (median-angle angs-near)
             ;; angle between the points around opposite point
             ;angle-opp (v-angle (v-sub (nth pts (inc i-opp)) (nth pts (dec i-opp))))
-            angs-opp-raw (take 3 (drop (dec i-opp) angs-skip1))
+            angs-opp (concat (take 1 (drop i-opp angs-skip1))
+                      ;(take 3 (drop (dec i-opp) angs-skip1))
+                             (take 2 (drop i-opp angs)))
             ;; flip since opposite angle
-            angs-opp-raw (map #(in-pi-pi (+ % PI)) angs-opp-raw)
-            ;; correct for discontinuity at -pi/+pi
-            angs-opp (if (> (median (map abs angs-opp-raw)) (* 0.8 PI))
-                          (map #(if (neg? %) (+ % TWOPI) %) angs-opp-raw)
-                          angs-opp-raw)
-            angle-opp (in-pi-pi (median angs-opp))
-            long-angle (in-pi-pi (median (concat angs-0 angs-opp)))
+            angs-opp (map #(in-pi-pi (+ % PI)) angs-opp)
+            angle-opp (median-angle angs-opp)
+            long-angle (median-angle (concat angs-near angs-opp))
             
-            ;; find index of single furthest point (TODO: use reduce?)
-            iz (apply max-key (fn [i] (:mag (nth pp i)))
-                      (range (count pp)))
-            ;; reorient around furthest point
-            pp-z (concat (drop iz pp) (take iz pp))
-            pts-z (concat (drop iz pts) (take iz pts))
-            
-            near-pt (first pts)
-            near-opp-pt (nth pts i-opp)
-            far-pt (first pts-z)
-            ;; direction of furthest point
-            far-dir (:ang (first pp-z))
             
             ;; check for straight edges - TODO - too rigid?
 ;            collin-0? (collinear? (last pts) (first pts) (second pts) angle-tol)
 ;            collin-opp? (collinear? (nth pts (dec i-opp)) (nth pts i-opp) (nth pts (inc i-opp)) angle-tol)
             ;; check for long thin shapes - always rects
-            extrusion (/ (:mag (first pp-z) (:mag (first pp))))
-            rect? (or (>= extrusion 3.1)
-                      (horizontal-angle? (- angle-0 angle-opp) angle-tol))
+            extrusion (/ (:mag (first pp-z)) (:mag (first pp)))
+            rect? (or (>= extrusion 1.9)
+                      (horizontal-angle? (- angle-near angle-opp) angle-tol))
                   ;     collin-0? collin-opp?)
             ]
+        ;(swank.core/break)
         (if rect?
           (let [;; find index of point opposite to the furthest
                 i-opp-z (apply max-key

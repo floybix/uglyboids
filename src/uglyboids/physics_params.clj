@@ -2,7 +2,7 @@
 
 (def px-height 768)
 (def px-width 1244)
-(def ground-level 612)
+(def ground-level 610)
 
 (def aspect-ratio (/ px-width px-height))
 

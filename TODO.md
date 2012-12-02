@@ -7,6 +7,7 @@
 * ROBUSTIFY - various levels of detail
   * use (try) on each shape detection, etc.
   * need to destroy World when creating a new one to avoid overflow?
+  * if shape detect fails after shooting, use simulation from initial
 
 ## Client Strategy ##
 * robot/configure /getConfiguration name?
@@ -26,6 +27,7 @@
 ## Vision ##
 
 * fix up bad struts e.g. level 1-5, 1-21
+  * for wood: need to give up on estimating surface angles
 * detect overlapping pigs/birds as segmentation slips
 * pigs: snap to standard sizes?
 
