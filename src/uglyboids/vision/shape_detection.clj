@@ -95,10 +95,12 @@
   (into (set coords)
         (mapcat #(neighbours % [min-x max-x] [min-y max-y]) coords)))
 
-(defn edge-points
-  "Return the set of points which are on the edge of a shape:
-specifically the left-/right-most or top-/bottom-most points on each
-horizontal or vertical coordinate."
+(defn each-edge-points
+  "Return a sequence of points which are on each edge of a shape in
+keys :left :right :top :bottom. The horizontal sides are ordered by
+increasing x value, vertical sides are ordered by increasing y value.
+NOTE: here :top has the highest y values, which may actually be the
+bottom if pixel origin is at top-left."
   [coords [x-lo x-hi] [y-lo y-hi] ground-level]
   (let [gl-ok (min y-hi (max y-lo ground-level))
         rng-x (inc (- x-hi x-lo))
@@ -122,15 +124,38 @@ horizontal or vertical coordinate."
                  (update-in right-xs [iy] max-ok x)
                  (update-in bot-ys [ix] min-ok y)
                  (update-in top-ys [ix] max-ok yb))) ;; since y in pixels increases "down"
-        ;; merge sets of points
         (let [to-points-lr (fn [i x] [x (+ i y-lo)])
               to-points-tb (fn [i y] [(+ i x-lo) y])
-              point-sets [(set (map-indexed to-points-lr left-xs))
-                          (set (map-indexed to-points-lr right-xs))
-                          (set (map-indexed to-points-tb bot-ys))
-                          (set (map-indexed to-points-tb top-ys))]
-              points (reduce clojure.set/union point-sets)]
-          (clojure.set/select #(not-any? nil? %) points))))))
+              nnil (fn [x] (filter #(not-any? nil? %) x))]
+          {:left   (nnil (map-indexed to-points-lr left-xs))
+           :right  (nnil (map-indexed to-points-lr right-xs))
+           :top    (nnil (map-indexed to-points-tb top-ys))
+           :bottom (nnil (map-indexed to-points-tb bot-ys))})))))
+
+(defn edge-points
+  "Return a sequence of all points which are on the edge of a shape:
+specifically the left-/right-most or top-/bottom-most points on each
+horizontal or vertical coordinate. The result is ordered
+counter-clockwise (assuming that increasing y is 'up'):
+* increasing x along :bottom
+* increasing y along :right STARTING from the last y from bottom, then
+* decreasing x along :top STARTING from the last x from right
+* decreasing y along :left STARTING from the last y from top"
+  [coords [x-lo x-hi] [y-lo y-hi] ground-level]
+  (let [edges (each-edge-points coords [x-lo x-hi] [y-lo y-hi] ground-level)
+        bottom (:bottom edges)
+        bottom-last-y (second (last bottom))
+        right (filter (fn [[x y]] (>= y bottom-last-y))
+                      (:right edges))
+        right-last-x (first (last right))
+        top (filter (fn [[x y]] (<= x right-last-x))
+                    (reverse (:top edges)))
+        top-last-y (second (last top))
+        bottom-first-y (second (first bottom))
+        left (filter (fn [[x y]] (and (<= y top-last-y)
+                                      (>= y bottom-first-y)))
+                     (reverse (:left edges)))]
+    (distinct (concat bottom right top left))))
 
 (defn segment-extrema
   "Finds the nearest and furthest points from a center point in each
@@ -279,6 +304,39 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
         m1 (angle-to-gradient ang1)]
     (line-intersection xy0 m0 xy1 m1)))
 
+(defn snap-vertices-to-other-shape
+  [verts coords fuzz debug]
+  (loop [vv verts
+         n-vv []]
+    (if (seq vv)
+      (let [v (first vv)
+            [v-x v-y] v
+            ;; closest vertex
+            ov1 (apply min-key #(v-mag2 (v-sub % v)) coords)
+            [ov1-x ov1-y] ov1
+            ;; vertices on the other (x) side
+            opp-coords (filter #(not= (< v-x ov1-x)
+                                      (< v-x (first %))) coords)]
+        (if (seq opp-coords)
+          (let [ov2 (apply min-key #(v-mag2 (v-sub % v)) opp-coords)
+                ov-ang (v-angle (v-sub ov2 ov1))
+                [new-x new-y] (angle-intersection ov1 ov-ang v PI_2)
+                shift (- new-y v-y)]
+            (if (<= (abs shift) fuzz)
+              (do
+                (when debug (println "SHIFTED vertex" v "by" shift))
+                (recur (next vv) (conj n-vv [new-x new-y])))
+              (recur (next vv) (conj n-vv v))))
+          ;; no opposite points, so v hanging off the edge. drop to ov1?
+          (let [shift (- ov1-y v-y)]
+            (if (<= (abs shift) fuzz)
+              (do
+                (when debug (println "SHIFTED vertex" v "by" shift "(overhang)"))
+                (recur (next vv) (conj n-vv [v-x ov1-y])))
+              (recur (next vv) (conj n-vv v))))))
+      n-vv)))
+
+
 (defn find-vertices-tri-quad
   [edge-pts cent-pt]
   (let [n-segments 24
@@ -388,50 +446,57 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
                      (nth pts i-rot-fwd)]]
             ;; return: convert back to global coordinates
             (map #(v-add % cent-pt) vtx)))))))
-        
+
 (defn find-vertices-polygon
-  [edge-pts convex? cent-pt]
-  (let [n-segments 24
-        distance-tol 4
-        angle-tol (/ PI 24) ;; 7.5 degrees
-        segx (segment-extrema edge-pts cent-pt n-segments
-                              :maxima-only? convex?)
-        n-segs-ok (count (filter seq segx))]
-    (if (<= n-segs-ok (quot n-segments 2))
-      ;; should not happen, but return:
-      nil
-      (let [;; collapse to a flat sequence of polar points (from segments)
-            all-pp (apply concat segx)
-            ;; find index of single furthest point
-            i0 (apply max-key (fn [i] (:mag (nth all-pp i)))
-                      (range (count all-pp)))
-            ;; start from furthest point as it must be a vertex
-            pp (concat (drop i0 all-pp) (take i0 all-pp))
-            ;; convert back to local rectangular coordinates (cent)
-            pts (map (fn [{:keys [mag ang]}] (polar-xy mag ang)) pp)]
-        ;; now eliminate points that are redundant due to collinearity
-        ;; TODO: detect long thin rects?
-        (loop [vtx (vec (take 1 pts))
-               more-pts (drop 1 pts)]
-          (let [p0 (peek vtx)
-                [p1 p2] (take 2 more-pts)]
-            (if p2
-              (if (collinear? p0 p1 p2 angle-tol)
-                (recur vtx (next more-pts))
-                ;; check for nearest points too close to center
-                ;; (happens when cent-pt on edge of non-convex shape)
-                ;; TODO: better to split non-convex shapes instead
-                (let [p1-d (v-mag p1)
-                      p02-d (apply min (map v-mag [p0 p2]))]
-                  ;(println {:p1-d p1-d :p02-ds p02-ds :p02-d p02-d})
-                  (if (and (< p1-d 16)
-                           (< (/ p1-d p02-d) 0.2))
-                    (recur vtx (next more-pts))
-                    ;; otherwise - vertex
-                    (recur (conj vtx p1)
-                           (next more-pts)))))
-              ;; return: convert back to global coordinates
-              (map #(v-add % cent-pt) vtx))))))))
+  [edge-pts cent-pt]
+  (let [distance-tol 5
+        angle-tol (/ PI 15)
+        ;; sample points to be separated enough from each other
+        tol2 (* distance-tol distance-tol)
+        pts (loop [more (drop 1 edge-pts)
+                   pts (vec (take 1 edge-pts))]
+              (if (seq more)
+                (let [curr (first more)
+                      prev (peek pts)
+                      d2 (v-mag2 (v-sub prev curr))]
+                  (if (>= d2 tol2)
+                    (recur (next more) (conj pts curr))
+                    (recur (next more) pts)))
+                pts))]
+    ;; we know edge-pts are ordered counter-clockwise around shape.
+    ;; sample by distance-tol
+    ;; and eliminate points that are redundant due to collinearity
+    (loop [more (drop 1 pts)
+           vtx (vec (take 1 pts))]
+      (let [p0 (peek vtx)
+            [p1 p2] (take 2 more)]
+        (if p2
+          (if (collinear? p0 p1 p2 angle-tol)
+            (recur (next more) vtx)
+            (do
+              ;(swank.core/break)
+              ;; add both new points
+              (recur (nnext more) (conj (conj vtx p1) p2)))
+            )
+          vtx)))))
+
+(defn snap-horizontals
+  [coords angle-tol]
+  (loop [more coords
+         vtx []]
+    (let [[p1 p2] (take 2 more)
+          [p1-x p1-y] p1
+          [p2-x p2-y] p2]
+      (if p2
+        (let [ang (v-angle (v-sub p2 p1))]
+          (if (and (not= p1-y p2-y)
+                   (horizontal-angle? ang angle-tol))
+            ;; snap to horizontal - by inserting a new point
+            ;; (since adjusting prev could disturb a previous horizontal)
+            (recur (next more)
+                   (into vtx [p1 [p1-x p2-y]]))
+            (recur (next more) (conj vtx p1))))
+        vtx))))
 
 (defn is-circular?
   [edge-pts cent-pt [x-lo x-hi] [y-lo y-hi]]
@@ -461,7 +526,8 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
 (defn shape-from-coords
   [coords convex? [x-lo x-hi] [y-lo y-hi] ground-level]
   (let [edge-pts (edge-points coords [x-lo x-hi] [y-lo y-hi] ground-level)
-        cent-pt (v-avg edge-pts)]
+        cent-pt [(quot (+ x-lo x-hi) 2)
+                 (quot (+ y-lo y-hi) 2)]]
     (if convex?
       ;; first, test for a circle
       (if-let [rad (is-circular? edge-pts cent-pt [x-lo x-hi] [y-lo y-hi])]
@@ -473,6 +539,7 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
           {:shape :poly
            :coords vtx}))
       ;; for non-convex go straight to polygon
-      (let [vtx (find-vertices-polygon edge-pts convex? cent-pt)]
+      (let [vtx (find-vertices-polygon edge-pts cent-pt)
+            vtx-hsnap (snap-horizontals vtx (/ PI 15))]
         {:shape :poly
-         :coords vtx}))))
+         :coords vtx-hsnap}))))

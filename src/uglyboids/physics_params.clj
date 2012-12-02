@@ -30,7 +30,8 @@
                  :rgb [241 219 32]}})
 
 (def materials
-  {:static {:density 1}
+  {:static {:density 1
+            :friction 1}
    :wood {:density 1}
    :glass {:density 1}
    :stone {:density 25}

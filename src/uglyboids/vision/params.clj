@@ -74,7 +74,7 @@
                        ;[0,0,0]          ; border black
                        ;[5,39,17]        ; border black
                        ;[135,190,107])   ; border black
-         :tolerance 15 ;28
+         :tolerance 24 ;28
          :size [25 2e9]}
    :glass {:colors (list [113,206,248]
                          [99,194,245]
