@@ -108,6 +108,3 @@
                  :tolerance 20
                  :size [45 200]}
    ))
-
-(def bird-types
-  #{:red-bird :blue-bird :yellow-bird})

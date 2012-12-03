@@ -6,7 +6,9 @@
         [cljbox2d.testbed :exclude [world-to-px-scale
                                     world-to-px
                                     px-to-world
-                                    ground-body]]
+                                    ground-body
+                                    set-buffering-contact-listener!
+                                    contact-buffer]]
         [cljbox2d.vec2d :only [v-mag v-angle v-sub]])
   (:require [quil.core :as quil]
             uglyboids.vision
@@ -19,6 +21,8 @@
     \n (next-bird!)
     \r (setup-world! @scene)
     \s (let [shot (choose-shot)]
+         (println "chose angle" (:angle shot)
+                  "with flight time" (:sim-flight shot))
          (wake! (:target-body shot))
          (shoot! (:angle shot)))
     \? (println "TODO")

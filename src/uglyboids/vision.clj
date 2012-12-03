@@ -20,7 +20,7 @@
 (def display-img (atom nil))
 (def the-frame (atom nil))
 
-;; pixel ranges within which to look for shapes
+;; pixel ranges within which to look for shapes 
 (def min-x 5)
 (def max-x (- px-width 10))
 (def min-y 150)
@@ -371,13 +371,18 @@
                                                   (take 1 (:coords geom))))
                                 (assoc geom
                                   :type type :rgb rgb))))
-                             normal-shapes)]
+                          normal-shapes)
+                objs (filter (fn [o]
+                               (or (= (:shape o) :circle)
+                                   (>= (count (:coords o)) 2)))
+                             objs)]
             (println "focus pt:" focus-pt " launch pt:" launch-pt
                      "sling-width:" sling-width "scale:" world-scale)
             {:state :in-play
              :world-scale world-scale
              :start focus-pt
              :birds (map :type bird-order)
+             :n-pigs (count pigs)
              :objs objs}))))))
 
 (defn paint

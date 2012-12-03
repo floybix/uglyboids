@@ -11,6 +11,9 @@
 (def world-width (atom base-world-width))
 (def world-height (atom (/ @world-width aspect-ratio)))
 
+(def bird-types
+  #{:red-bird :blue-bird :yellow-bird})
+
 ;; note radius is in pixels
 (def bird-attrs
   {:red-bird {:radius 0.56
@@ -29,13 +32,22 @@
                  :restitution 0.2
                  :rgb [241 219 32]}})
 
+(def initial-resistances
+  {:wood 2.0
+   :glass 5.0
+   :stone 20.0
+   :pig 1.0})
+;; TODO: helmet-pig, tiny-pig
+
 (def materials
   {:static {:density 1
-            :friction 1}
+            :friction 1.0}
    :wood {:density 1}
-   :glass {:density 1}
+   :glass {:density 1
+           :restitution 0}
    :stone {:density 25}
-   :pig {:density 2}
+   :pig {:density 2
+         :restitution 0}
    })
 
 (def launch-speed 27.4)
