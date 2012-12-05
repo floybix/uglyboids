@@ -17,7 +17,7 @@
 (def team "Zonino")
 
 (def curr-level (atom -1))
-(def max-level (atom -1))
+(def max-level (atom 1))
 
 ;; stores info about each level by index
 ;; each as an (atom) map, with
@@ -46,7 +46,7 @@
 (defn refresh-configuration!
   []
   (let [conf (.getConfiguration robot team)]
-    (reset! max-level (.getMax_level conf))
+    (swap! max-level max (.getMax_level conf))
     (reset! curr-level (.getCurrent_level conf))
     (println "current level " @curr-level ", max" @max-level)))
 
@@ -54,20 +54,29 @@
   "Note i can be -1 to load the current level, e.g. at start.
    This only sets 'scene', it does not build the world."
   [i]
-  (try
-    (println "requesting to load level" i)
-    (.loadALevel robot i)
-    (catch Exception e (println (.getMessage e))))
-  ;; important - need this to update curr-level
-  (refresh-configuration!)
-  (if-let [cached-scene (:init-scene @(curr))]
-    (reset! scene cached-scene)
-    (scene-snapshot!))
-  (reset! curr-shots []))
+  (let [ok? (try
+              (println "requesting to load level" i)
+              (.loadALevel robot i)
+              (catch Exception e
+                (println (.getMessage e))
+                false))]
+    ;; important - need this to update curr-level
+    (refresh-configuration!)
+    (when ok?
+      (let [cached-scene (:init-scene @(curr))]
+        (if (or (nil? cached-scene)
+                (= (mod (:failures @(curr)) 2) 1))
+          (scene-snapshot!)
+          (reset! scene (:init-scene @(curr)))))
+      (reset! curr-shots []))))
 
 (defn choose-and-load-a-level!
   []
-  (load-level! @max-level))
+  (let [ok? (load-level! @max-level)]
+    (when-not ok?
+      (refresh-configuration!)
+      (swap! max-level dec)
+      (recur))))
 
 (defn do-shots!
   [shots]
@@ -86,11 +95,6 @@
         (.add al (Shot. x0-px y0-px drag-x drag-y 0 tap-ms))))
     (.shoot robot al)))
 
-(defn simulate-shot!
-  [shot]
-  (shoot! (:angle shot))
-  (simulate-for (+ (:sim-flight shot) 3.0)))
-
 (defn -main
   [& args]
   (let [serverip (if (seq args) (first args) "localhost")
@@ -100,12 +104,17 @@
     (.configure robot team)
     (load-level! start-level)
     (while true
-      (if (= :in-play (:state @scene))
+      (if (and (= :in-play (:state @scene))
+               (<= (count @curr-shots) 8)) ;; give up after 8 shots
         (do
           (println "building world...")
           (setup-world! @scene)
           ;; TODO: select from a list of possible shots, exclude those already tried
-          (let [shot (choose-shot)]
+          (let [attempts (:attempts @(curr))
+                shot (try (choose-shot attempts)
+                          (catch Exception e
+                            (println (.getMessage e))
+                            (choose-shot-naive attempts)))]
             (swap! curr-shots conj shot)
             (when (= 1 (count @curr-shots))
               (swap! (curr) update-in [:first-shots] conj shot))
@@ -121,7 +130,7 @@
             (do
               (swap! (curr) assoc
                      :solution @curr-shots)
-              )
+              (swap! max-level max (inc @curr-level)))
             ;; otherwise must be failure
             (do
               (swap! (curr) update-in [:failures] inc)

@@ -1,4 +1,4 @@
-(defproject uglyboids "0.4.0-SNAPSHOT"
+(defproject uglyboids "0.9.2-SNAPSHOT"
   :description "A program to play Angry Birds from screenshots.
                 An entry in the AI12 Angry Birds Challenge."
   :url "http://github.com/floybix/uglyboids"

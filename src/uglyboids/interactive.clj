@@ -20,10 +20,13 @@
   (case (quil/raw-key)
     \n (next-bird!)
     \r (setup-world! @scene)
-    \s (let [shot (choose-shot)]
+    \s (let [shot (choose-shot-simple)]
          (println "chose angle" (:angle shot)
                   "with flight time" (:sim-flight shot))
-         (wake! (:target-body shot))
+         (shoot! (:angle shot)))
+    \c (let [shot (choose-shot 0)]
+         (println "chose angle" (:angle shot)
+                  "with flight time" (:sim-flight shot))
          (shoot! (:angle shot)))
     \? (println "TODO")
     ;; otherwise pass on to testbed
@@ -70,6 +73,7 @@
                      ;; default
                      uglyboids.levels.level-1-2/level)]
     (reset! scene load-scene)
+    (reset! step-fn game-step!)
     (setup-world! load-scene))
   (quil/defsketch the-sketch
     :title "Ugly boids"
@@ -79,4 +83,4 @@
     :mouse-pressed my-mouse-pressed
     :mouse-released my-mouse-released
     :mouse-dragged my-mouse-dragged
-    :size [px-width px-height]))
+    :size [(quot px-width 2) (quot px-height 2)]))

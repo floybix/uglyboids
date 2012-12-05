@@ -358,13 +358,170 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
       n-vv)))
 
 (defn find-vertices-tri-quad
+  [edge-pts cent-pt type]
+  (let [
+        n (count edge-pts)
+        lpts (map #(v-sub % cent-pt) edge-pts)
+        [near-i near-pt] (apply min-key (fn [[i pt]] (v-mag2 pt))
+                                (map-indexed vector lpts))
+        [far-i far-pt] (apply max-key (fn [[i pt]] (v-mag2 pt))
+                              (map-indexed vector lpts))
+        far-pt (apply max-key v-mag2 lpts)
+        far-flip-pt (mapv - far-pt)
+        near-flip-pt (mapv - near-pt)
+;        near-opp-pt (nth (mod (+ near-i (quot n 2)) n) lpts)
+        ;; for a rect, the near point will be rotated about 90 degrees
+        ;; from far point -- but for a triangle it would be 60 or 180.
+        ;; maximum distance around is (~ 180 degrees) n/2
+        near-to-far-ii (mod (- near-i far-i) (quot n 2))
+        near-to-far-frac (/ near-to-far-ii (/ n 2))
+        elongation (/ (v-mag far-pt) (v-mag near-pt))
+        strut? (and (>= elongation 3.0)
+                    (= type :wood))
+        rect? true] ;(or (>= elongation 1.9)
+              ;    (<= (abs (- near-to-far-frac 0.5)) 0.1))]
+    (if rect?
+      (if strut?
+        (let [long-angle (v-angle (v-sub far-pt far-flip-pt))
+              perp-angle (+ long-angle PI_2)
+              near-pt (polar-xy 4 perp-angle)
+              near-flip-pt (polar-xy -4 perp-angle)
+              ;; we have all we need: the long angle, short angle assumed perpendicular,
+              ;; and points on long edge and far edges.
+              ;; find vertices
+              vtx [(angle-intersection near-pt long-angle far-pt perp-angle)
+                   (angle-intersection far-pt perp-angle near-flip-pt long-angle)
+                   (angle-intersection near-flip-pt long-angle far-flip-pt perp-angle)
+                   (angle-intersection far-flip-pt perp-angle near-pt long-angle)]
+              vtx (sort-by v-angle vtx)]
+          ;; return: convert back to global coordinates
+          (map #(v-add % cent-pt) vtx))
+        ;; rect
+        (let [n-segments 24
+              angle-tol (/ PI 9) ;; 20 degrees
+              segx (segment-extrema edge-pts cent-pt n-segments
+                                    :maxima-only? true)
+              ;; collapse to a flat sequence of polar points (from segments)
+              all-pp (apply concat segx)
+              ;; find index of single closest point
+              i0 (apply min-key (fn [i] (:mag (nth all-pp i)))
+                        (range (count all-pp)))
+              ;; rotate points sequence to start from closest point
+              pp (concat (drop i0 all-pp) (take i0 all-pp))
+              ;; convert back to local rectangular coordinates (cent)
+              pts (map (fn [{:keys [mag ang]}] (polar-xy mag ang)) pp)
+              n (count pts)
+              ;; find index of point in opposite direction
+              near-pt (first pts)
+              near-dir (:ang (first pp))
+              i-opp (apply max-key
+                           (fn [i] (abs (in-pi-pi (- near-dir (:ang (nth pp i))))))
+                           (range 3 (- n 2)))
+              near-opp-pt (nth pts i-opp)
+              ;; find index of single furthest point
+              iz (apply max-key (fn [i] (:mag (nth pp i)))
+                        (range (count pp)))
+              ;; rotate points sequence to start from furthest point
+              pp-z (concat (drop iz pp) (take iz pp))
+              pts-z (concat (drop iz pts) (take iz pts))
+              far-pt (first pts-z)
+              far-dir (:ang (first pp-z))
+
+              ;; estimate angle of surface at closest point
+              angs (map (fn [[p0 p1]] (v-angle (v-sub p1 p0)))
+                        (backward-pairs-wrapped pts))
+              ;; find angles between pairs of points, skipping over one
+              angs-skip1 (map (fn [[p0 p1 p2]] (v-angle (v-sub p2 p0)))
+                              (triples-wrapped pts))
+              ;; angle between the points around closest point
+                                        ;angle-0 (v-angle (v-sub (second pts) (last pts)))
+              angs-near (concat         ;(take-last 1 angs-skip1)
+                         (take 1 angs-skip1) ;2 angs-skip1)
+                         (take 2 angs))
+              angle-near (median-angle angs-near)
+              ;; angle between the points around opposite point
+                                        ;angle-opp (v-angle (v-sub (nth pts (inc i-opp)) (nth pts (dec i-opp))))
+              angs-opp (concat (take 1 (drop i-opp angs-skip1))
+                                        ;(take 3 (drop (dec i-opp) angs-skip1))
+                               (take 2 (drop i-opp angs)))
+              ;; flip since opposite angle
+              angs-opp (map #(in-pi-pi (+ % PI)) angs-opp)
+              angle-opp (median-angle angs-opp)
+              
+              long-angle (median-angle (concat angs-near angs-opp))
+              far-opp-pt (mapv - far-pt)
+                
+              long-angle (if strut? (v-angle (v-sub far-pt far-opp-pt))
+                             long-angle)
+              perp-angle (+ long-angle PI_2)
+              
+              vtx [(angle-intersection near-pt long-angle far-pt perp-angle)
+                   (angle-intersection far-pt perp-angle near-opp-pt long-angle)
+                   (angle-intersection near-opp-pt long-angle far-opp-pt perp-angle)
+                   (angle-intersection far-opp-pt perp-angle near-pt long-angle)]
+              vtx (sort-by v-angle vtx)]
+          ;; return: convert back to global coordinates
+          (map #(v-add % cent-pt) vtx)))
+      ;; otherwise: is triangle.
+      ;; find furthest points in 120-degree segments opposite furthest
+      (let [n-segments 24
+            angle-tol (/ PI 9) ;; 20 degrees
+            segx (segment-extrema edge-pts cent-pt n-segments
+                                  :maxima-only? true)
+            ;; collapse to a flat sequence of polar points (from segments)
+            all-pp (apply concat segx)
+            ;; find index of single closest point
+            i0 (apply min-key (fn [i] (:mag (nth all-pp i)))
+                      (range (count all-pp)))
+            ;; rotate points sequence to start from closest point
+            pp (concat (drop i0 all-pp) (take i0 all-pp))
+            ;; convert back to local rectangular coordinates (cent)
+            pts (map (fn [{:keys [mag ang]}] (polar-xy mag ang)) pp)
+            n (count pts)
+            ;; find index of point in opposite direction
+            near-pt (first pts)
+            near-dir (:ang (first pp))
+            i-opp (apply max-key
+                         (fn [i] (abs (in-pi-pi (- near-dir (:ang (nth pp i))))))
+                         (range 3 (- n 2)))
+            near-opp-pt (nth pts i-opp)
+            ;; find index of single furthest point
+            iz (apply max-key (fn [i] (:mag (nth pp i)))
+                      (range (count pp)))
+            ;; rotate points sequence to start from furthest point
+            pp-z (concat (drop iz pp) (take iz pp))
+            pts-z (concat (drop iz pts) (take iz pts))
+            far-pt (first pts-z)
+            far-dir (:ang (first pp-z))
+            
+            ;; find index of point in 120-degree segment offset 60-degrees above the furthest
+            i-rot-fwd (apply max-key (fn [i]
+                                       (let [rot (in-pi-pi (- (:ang (nth pp i)) far-dir))]
+                                         (if (>= rot (/ PI 3))
+                                           (:mag (nth pp i)) 0)))
+                             (range 2 (- n 1)))
+            ;; find index of point in 120-degree segment offset 60-degrees below the furthest
+            i-rot-back (apply max-key (fn [i]
+                                        (let [rot (in-pi-pi (- (:ang (nth pp i)) far-dir))]
+                                          (if (<= rot (- (/ PI 3)))
+                                            (:mag (nth pp i)) 0)))
+                              (range 2 (- n 1)))
+            vtx [(nth pts i-rot-back)
+                 (nth pts iz)
+                 (nth pts i-rot-fwd)]]
+        ;; return: convert back to global coordinates
+        (map #(v-add % cent-pt) vtx)))))
+
+
+(defn find-vertices-tri-quad-OLD
   [edge-pts cent-pt]
   (let [n-segments 24
         angle-tol (/ PI 9) ;; 20 degrees
         segx (segment-extrema edge-pts cent-pt n-segments
                               :maxima-only? true)
         n-segs-ok (count (filter seq segx))]
-    (if (<= n-segs-ok (quot n-segments 3))
+;    (swank.core/break)
+    (if (<= n-segs-ok 2)
       ;; should not happen, but return:
       nil
       (let [;; collapse to a flat sequence of polar points (from segments)
@@ -421,22 +578,29 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
 ;            collin-opp? (collinear? (nth pts (dec i-opp)) (nth pts i-opp) (nth pts (inc i-opp)) angle-tol)
             ;; check for long thin shapes - always rects
             extrusion (/ (:mag (first pp-z)) (:mag (first pp)))
+            strut? (>= extrusion 4.0)
             rect? (or (>= extrusion 1.9)
                       (horizontal-angle? (- angle-near angle-opp) angle-tol))
                   ;     collin-0? collin-opp?)
             ]
-        ;(swank.core/break)
         (if rect?
           (let [;; find index of point opposite to the furthest
-                i-opp-z (apply max-key
-                               (fn [i] (abs (in-pi-pi (- far-dir (:ang (nth pp-z i))))))
-                               (range 3 (- n 2)))
+                ;i-opp-z (apply max-key
+                ;               (fn [i] (abs (in-pi-pi (- far-dir (:ang (nth pp-z i))))))
+                ;               (range 3 (- n 2)))
                 ;; more robust? - get opposite point by flipping around cent
                 far-opp-pt (mapv - far-pt)
+                
+                long-angle (if strut? (v-angle (v-sub far-pt far-opp-pt))
+                               long-angle)
+                perp-angle (+ long-angle PI_2)
+                near-pt (if strut? (polar-xy 4 perp-angle)
+                            near-pt)
+                near-opp-pt (if strut? (polar-xy -4 perp-angle)
+                                near-opp-pt)
+;                _ (swank.core/break)
                 ;; we have all we need: the long angle, short angle assumed perpendicular,
                 ;; and points on long edge and far edges.
-                ;long-angle angle-0
-                perp-angle (+ long-angle PI_2)
                 ;; find vertices
                 vtx [(angle-intersection near-pt long-angle far-pt perp-angle)
                      (angle-intersection far-pt perp-angle near-opp-pt long-angle)
@@ -538,22 +702,22 @@ for (n-1,0,1) and the last is for (n-2,n-1,0)."
       false)))
 
 (defn shape-from-coords
-  [coords convex? [x-lo x-hi] [y-lo y-hi] ground-level]
+  [coords convex? [x-lo x-hi] [y-lo y-hi] ground-level type]
   (let [edge-pts (edge-points coords [x-lo x-hi] [y-lo y-hi] ground-level)
         cent-pt [(quot (+ x-lo x-hi) 2)
                  (quot (+ y-lo y-hi) 2)]]
-    (if convex?
-      ;; first, test for a circle
-      (if-let [rad (is-circular? edge-pts cent-pt [x-lo x-hi] [y-lo y-hi])]
-        {:shape :circle
-         :radius rad
-         :pos cent-pt}
-        ;; not circular
-        (let [vtx (find-vertices-tri-quad edge-pts cent-pt)]
+    ;; first, test for a circle
+    (if-let [rad (is-circular? edge-pts cent-pt [x-lo x-hi] [y-lo y-hi])]
+      {:shape :circle
+       :radius rad
+       :pos cent-pt}
+      ;; not circular
+      (if convex?
+        (let [vtx (find-vertices-tri-quad edge-pts cent-pt type)]
           {:shape :poly
-           :coords vtx}))
-      ;; for non-convex go straight to polygon
-      (let [vtx (find-vertices-polygon edge-pts cent-pt)
-            vtx-hsnap (snap-horizontals vtx (/ PI 15))]
-        {:shape :poly
-         :coords vtx-hsnap}))))
+           :coords vtx})
+        ;; for non-convex go straight to polygon
+        (let [vtx (find-vertices-polygon edge-pts cent-pt)
+              vtx-hsnap (snap-horizontals vtx (/ PI 15))]
+          {:shape :poly
+           :coords vtx-hsnap})))))

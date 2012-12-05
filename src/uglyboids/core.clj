@@ -4,7 +4,8 @@
                                v-mag v-angle v-sub v-scale]]
         uglyboids.physics-params)
   (:import (org.jbox2d.callbacks ContactListener)
-           (org.jbox2d.collision WorldManifold)))
+           (org.jbox2d.collision WorldManifold)
+           (org.jbox2d.collision AABB)))
 
 (def scene (atom nil))
 
@@ -58,6 +59,7 @@ The normal points from A to B."
         lstnr (reify ContactListener
                 (beginContact [_ _])
                 (endContact [_ _])
+                (preSolve [_ _ _])
                 (postSolve [_ contact c-impulse]
                   (let [manifold (.getManifold contact)
                         pcount (.pointCount manifold)]
@@ -100,39 +102,49 @@ The normal points from A to B."
                        (= :btyp :yellow-bird)
                        (if (= :type :wood)
                          0.95
-                         0.25)
+                         0.20)
                        (and (= :type :glass)
                             (= :btyp :blue-bird))
                        0.95
+                       (= :type :glass)
+                       0.2
                        :else 0.5)
         eff-imp (* 2 imp effectiveness) ;; to target (damage)
         eff-react (* 2 imp (- 1 effectiveness))] ;; to bird (bounce)
-    ;; first undo the impulses already applied to bird and block
-    (apply-impulse! bird (v-scale (:normal oth-info) imp)
-                    (:pt bird-info))
-    (apply-impulse! oth (v-scale (:normal bird-info) imp)
-                    (:pt oth-info))
-    (if (>= eff-imp resist)
-      ;; destroyed. calculate reaction to bird.
-      ;; effective resistance impulse
-      (let [net-eff-react (- eff-react resist)]
-          (apply-impulse! bird (v-scale (:normal bird-info) net-eff-react)
-                          (:pt bird-info))
-          (if (:pig? oth-info)
-            (swap! pig-tally inc)
-            (swap! block-tally inc))
-          (swap! destroyed conj (:fixt oth-info))
-          (destroy! oth))
-      ;; not destroyed - but apply damage
-      (let [new-resist (- resist eff-imp)]
-        (apply-impulse! bird (v-scale (:normal bird-info) eff-react)
+    (when (pos? imp)
+      (when resist
+        ;; first undo the impulses already applied to bird and block
+        (apply-impulse! bird (v-scale (:normal oth-info) imp)
                         (:pt bird-info))
-        (apply-impulse! oth (v-scale (:normal oth-info) eff-imp)
+        (apply-impulse! oth (v-scale (:normal bird-info) imp)
                         (:pt oth-info))
-        (swap! (user-data oth) assoc :resistance new-resist)
-        (if (:pig? oth-info)
-          (swap! pig-damage + eff-imp)
-          (swap! block-damage + eff-imp))))))
+        (if (>= eff-imp resist)
+          ;; destroyed. calculate reaction to bird.
+          ;; effective resistance impulse
+          (let [net-eff-react (- eff-react resist)]
+            (apply-impulse! bird (v-scale (:normal bird-info) net-eff-react)
+                            (:pt bird-info))
+            (if (:pig? oth-info)
+              (swap! pig-tally inc)
+              (swap! block-tally inc))
+            (when (:pig? oth-info)
+                                        ;(swap! pigs dissoc oth))
+              (println "pig destroyed")
+              (reset! pigs (set (remove #(= oth %) @pigs))))
+            (when-not (:pig? oth-info)
+              (println "block destroyed"))
+            (swap! destroyed conj (:fixt oth-info))
+            (destroy! oth))
+          ;; not destroyed - but apply damage
+          (let [new-resist (- resist eff-imp)]
+            (apply-impulse! bird (v-scale (:normal bird-info) eff-react)
+                            (:pt bird-info))
+            (apply-impulse! oth (v-scale (:normal oth-info) eff-imp)
+                            (:pt oth-info))
+            (swap! (user-data oth) update-in [:resistance] - eff-imp)
+            (if (:pig? oth-info)
+              (swap! pig-damage + eff-imp)
+              (swap! block-damage + eff-imp))))))))
 
 (defn pig-hit
   [pig-info]
@@ -140,16 +152,21 @@ The normal points from A to B."
         dat @(user-data bod)
         resist (:resistance dat)
         imp (:imp pig-info)]
-    (if (>= imp resist)
-      ;; destroyed
-      (do
-        (swap! pig-tally inc)
-        (swap! destroyed conj (:fixt pig-info))
-        (destroy! bod))
-      ;; not destroyed - but apply damage
-      (let [new-resist (- resist imp)]
-        (swap! (user-data bod) assoc :resistance new-resist)
-        (swap! pig-damage + imp)))))
+    (when (pos? imp)
+      ;(println "pig hit, resistance" resist "impact" imp)
+      (if (>= imp resist)
+        ;; destroyed
+        (do
+          (swap! pig-tally inc)
+                                        ;(swap! pigs dissoc bod)
+          (reset! pigs (set (remove #(= bod %) @pigs)))
+          (swap! destroyed conj (:fixt pig-info))
+          (println "pig destroyed")
+          (destroy! bod))
+        ;; not destroyed - but apply damage
+        (let [new-resist (- resist imp)]
+          (swap! (user-data bod) update-in [:resistance] - imp)
+          (swap! pig-damage + imp))))))
 
 (defn block-hit
   [info]
@@ -160,17 +177,20 @@ The normal points from A to B."
           dat @(user-data bod)
           resist (:resistance dat)
           imp (:imp info)]
-      (if (>= imp resist)
-        ;; destroyed
-        (do
-          (swap! block-tally inc)
-          (swap! destroyed conj (:fixt info))
-          (destroy! bod))
-        ;; not destroyed - but apply damage
-        (let [new-resist (- resist imp)]
-          ;; TODO - limit reaction force
-          (swap! (user-data bod) assoc :resistance new-resist)
-          (swap! block-damage + imp))))))
+      (when (pos? imp)
+                                        ;(println "block hit, resistance" resist "impact" imp)
+        (if (>= imp resist)
+          ;; destroyed
+          (do
+            (swap! block-tally inc)
+            (swap! destroyed conj (:fixt info))
+            (println "block destroyed")
+            (destroy! bod))
+          ;; not destroyed - but apply damage
+          (let [new-resist (- resist imp)]
+            ;; TODO - limit reaction force
+            (swap! (user-data bod) update-in [:resistance] - imp)
+            (swap! block-damage + imp)))))))
 
 (defn make-bird!
   [bird-type]
@@ -200,7 +220,8 @@ The normal points from A to B."
 (defn setup-world!
   [scene]
   (create-world!)
-  ;(set-buffering-contact-listener!)
+  (set-buffering-contact-listener!)
+  (reset! contact-buffer [])
   ;; establish world scale
   (reset! world-width (* base-world-width (:world-scale scene)))
   (reset! world-height (/ @world-width aspect-ratio))
@@ -309,22 +330,8 @@ The normal points from A to B."
      :ab-tap-t (* ab-flight tap-frac)
      :target-pt target-pt}))
 
-(defn choose-shot
-  []
-  (let [dynamics (remove #(= :static (body-type %)) (bodyseq))
-        poss (concat @pigs (take 2 (shuffle dynamics)))
-        pig (first (shuffle poss)) ;(apply min-key #(first (position %)) @pigs)
-        target-pt (position pig)
-        shot (shot-at (position pig)
-                      (< (rand) 0.5) 0.9)]
-    (assoc shot
-      :target-body pig
-      :target-type (:type @(user-data pig)))))
-
 (defn game-step!
-  [tstep]
-  (reset! contact-buffer [])
-  (step! tstep)
+  []
   (doseq [ctct  @contact-buffer] 
     (let [[fixt-a fixt-b pt normal imp] ctct
           fixts (list fixt-a fixt-b)]
@@ -352,10 +359,123 @@ The normal points from A to B."
            (:pig? info-b) (pig-hit info-b)
            :else (do
                    (block-hit info-a)
-                   (block-hit info-b))))))))
+                   (block-hit info-b)))))))
+    (reset! contact-buffer []))
 
 (defn simulate-for
   [dur]
   (let [start-t @world-time]
     (while (< @world-time (+ start-t dur))
-      (step! (/ 1.0 20.0)))))
+      (step! (/ 1.0 20.0))
+      (game-step!))))
+
+(defn simulate-shot! 
+  [shot] 
+  (try 
+    (shoot! (:angle shot)) 
+    (let [eff-f (future (simulate-for (+ (:sim-flight shot) 3.0)))]
+      (deref eff-f 2000 {:pigs-done @pig-tally 
+                        :pig-damage @pig-damage 
+                        :blocks-gone @block-tally}))
+    (catch Exception e 
+      (println "simulate-shot!:" (.getMessage e))))
+  {:pigs-done @pig-tally 
+   :pig-damage @pig-damage 
+   :blocks-gone @block-tally})
+
+(defn poss-targets
+  []
+  (let [world-ground (second (px-to-world [0 ground-level]))
+        poss (remove #((conj bird-types :ground :static-wood)
+                       (:type @(user-data %))) (bodyseq))
+        by-potential (sort-by (fn [bod] 
+                              (let [y (second (center bod)) 
+                                    h (- y world-ground)]
+                                (* h (Math/sqrt (mass bod))))) 
+                              poss)
+        ;; TODO: wood for yellow, glass for blue 
+        targets (concat @pigs (take-last 1 by-potential)) 
+        targets-info (map (fn [o] 
+                            {:pt (center o) 
+                             :type (:type @(user-data o))}) 
+                          targets)
+        ;; try ends of horizontal beams
+        beam-pts (map (fn [fx]
+                        (let [o (body fx)]
+                        (when (= :dynamic (body-type o))
+                          (let [ab (aabb fx)
+                                [x-span y-span] (v2xy (.getExtents ab))]
+                            (when (> (/ x-span y-span) 3)
+                              (let [[xc yc] (center o)
+                                    x-lo (- xc (/ x-span 2))
+                                    x-hi (+ xc (/ x-span 2))
+                                    y-lo (- yc (/ y-span 2))
+                                    y-hi (+ yc (/ y-span 2))]
+                                (println [[x-lo x-hi] [y-lo y-hi] world-ground])
+                                (when (> y-lo (+ world-ground 0.2))
+                                  [x-lo (/ (+ y-lo y-hi) 2)])))))))
+                      (fixtureseq))
+        beam-info (map (fn [pt] {:pt pt :type :beam})
+                       (remove nil? beam-pts))
+        targets-info (concat targets-info (take 3 beam-info))]
+    targets-info))
+
+(defn ranked-shots 
+  [] 
+  (let [targets-info (poss-targets)
+        eval-shots (doall (for [{:keys [pt type]} targets-info
+                                direct? [true false]]
+                            (let [tap-frac (+ 0.8 (rand 0.25))
+                                  shot (shot-at pt direct? tap-frac)]
+                              (println "simulating" (if direct? "direct" "mortar")
+                                       "shot at" type "angle" (:angle shot))
+                              (let [effects (simulate-shot! shot)]
+                                (println "EFFECTS:" effects)
+                                ;; hoping we can reset everything this way. 
+                                ;; problem might be any stored JBox2D objects?
+                                (setup-world! @scene)
+                                (merge shot effects {:target-type type})))))]
+    (reverse (sort-by (juxt :pigs-done :pig-damage :blocks-gone)
+                      eval-shots))))
+
+(defn choose-shot
+  [i]
+  (let [rs (ranked-shots)
+        i-mod (mod i (- (count rs) 5))]
+    (nth rs (+ i-mod (rand-int 3)))))
+
+(defn choose-shot-naive
+  [i]
+  (let [ti (poss-targets)
+        {:keys [pt type]} (rand-nth ti)
+        direct? (> (rand) 0.7)
+        tap-frac (+ 0.8 (rand 0.25))
+        shot (shot-at pt direct? tap-frac)]
+    (assoc shot :target-type type)))
+
+(defn choose-shot-simple
+  []
+  (let [world-ground (second (px-to-world [0 ground-level]))
+        poss (remove #(bird-types (:type @(user-data %))) (bodyseq))
+        by-height (sort-by (fn [bod] 
+                             (let [y (second (center bod)) 
+                                   h (- y world-ground)] 
+                               h))
+                           poss)
+        targets (concat [(rand-nth (seq @pigs)) (rand-nth (seq @pigs))]
+                        (take-last 2 by-height))
+        target (rand-nth targets)
+        type (:type @(user-data target))
+        direct? (> (rand) 0.6)
+        tap-frac (+ 0.8 (rand 0.25))
+        shot (shot-at (center target) direct? tap-frac)
+        effects (simulate-shot! shot)]
+    (println "simulating" (if direct? "direct" "mortar")
+             "shot at" type "angle" (:angle shot))
+    (let [effects (simulate-shot! shot)]
+      (println "EFFECTS:" effects)
+      ;; hoping we can reset everything this way. 
+      ;; problem might be any stored JBox2D objects?
+      (setup-world! @scene)
+      (println "simulated shot effects: " effects)
+      (merge shot effects {:target-type type}))))

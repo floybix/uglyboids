@@ -33,19 +33,19 @@
                  :rgb [241 219 32]}})
 
 (def initial-resistances
-  {:wood 2.0
-   :glass 5.0
-   :stone 20.0
-   :pig 1.0})
+  {:wood 2000
+   :glass 2000
+   :stone 5000
+   :pig 50})
 ;; TODO: helmet-pig, tiny-pig
 
 (def materials
   {:static {:density 1
             :friction 1.0}
-   :wood {:density 1}
-   :glass {:density 1
+   :wood {:density 2}
+   :glass {:density 3
            :restitution 0}
-   :stone {:density 25}
+   :stone {:density 8}
    :pig {:density 2
          :restitution 0}
    })

@@ -102,8 +102,8 @@
                     :size [50 1e9]}
    :blue-bird {:colors (list [99,170,197]
                              [202 143 9]);[255,174,0])
-               :tolerance 20
-               :size [18 200]}
+               :tolerance 22
+               :size [15 200]}
    :yellow-bird {:colors (list [241,219,32])
                  :tolerance 20
                  :size [45 200]}

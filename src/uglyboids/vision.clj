@@ -105,7 +105,7 @@
                 (quot (+ y0 y1) 2)]
        })))
 
-(defn shape-from-blob
+(defn shape-from-blob*
   [{:keys [type coords x-range y-range mid-pt]}]
   (let [[x-lo x-hi] x-range
         [y-lo y-hi] y-range]
@@ -130,12 +130,18 @@
       :pig {:shape :circle
             :radius (dec (quot (max (- x-hi x-lo) (- y-hi y-lo)) 2))
             :pos (v-add mid-pt [0 -1])} ;; dodge overlaps
-      :static-surface (shape-from-coords coords false x-range y-range ground-level)
-      :static-wood (shape-from-coords coords true x-range y-range ground-level)
+      :static-surface (shape-from-coords coords false x-range y-range ground-level type)
+      :static-wood (shape-from-coords coords false x-range y-range ground-level type)
       ;; else - dynamic blocks
       ;; do not drop edges to ground level
-      (shape-from-coords coords true x-range y-range max-y))))
+      (shape-from-coords coords true x-range y-range max-y type))))
 
+(defn shape-from-blob
+  [m]
+  (try (shape-from-blob* m)
+       (catch Exception e
+         nil)))
+  
 (defn deepCopyBI
   [^BufferedImage bi]
   (let [cm (.getColorModel bi)
@@ -148,8 +154,8 @@
         ^BufferedImage class-img (deepCopyBI img)
         ok-params (dissoc object-params :tap :trajectory :sky :ground)]
     (when *debug*
-      (doseq [y (range 0 px-height)
-              x (range 0 px-width)]
+      (doseq [y (range min-y max-y)
+              x (range min-x max-x)]
         (.setRGB class-img x y
                  (-> (.getRGB class-img x y)
                      (Color.)
@@ -160,7 +166,7 @@
       (repaint! @the-frame))
     (reset-cells!)
     ;; recursively build up 'blobs'
-    (loop [pts (for [y (reverse (range min-y (inc max-y)))
+    (loop [pts (for [y (range min-y (inc max-y))
                      x (range min-x (inc max-x))] [x y])
            blobs []]
       (if (seq pts)
@@ -186,7 +192,10 @@
                   ;; check within allowed size range
                   (if (and (<= min-px pxx max-px)
                            (>= (- x-hi x-lo) 4)
-                           (>= (- y-hi y-lo) 4))
+                           (>= (- y-hi y-lo) 4)
+                           (or (not= type :static-wood)
+                               (>= (- x-hi x-lo) 10)
+                               (>= (- y-hi y-lo) 10)))
                     (do
                       (when *debug*
                         (let [seed-int (rgb-int (first my-colors))]
@@ -233,7 +242,7 @@
   ;; REMEMBER: higher y coordinates are further "down" in the world!
   ;; this would be a bit cleaner if went through and deref'd all the :geoms first
   (loop [upward (sort-by #(- (second (:y-range %)))
-                         shapes)
+                         (remove #(nil? @(:geom %)) shapes))
          downward []]
     (if (seq upward)
       (let [shape (first upward)
@@ -273,8 +282,16 @@
                                     (<= (count cc) 1))
                               (recur (next others) shape)
                               ;; ok, go: check each of the vertices
-                              (let [new-lo (snap-vertices-to-other-shape low-verts cc fuzz *debug*)
-                                    new-hi (snap-vertices-to-other-shape high-verts cc fuzz *debug*)]
+                              (let [new-lo (try
+                                             (snap-vertices-to-other-shape low-verts cc fuzz *debug*)
+                                             (catch Exception e
+                                               (println (.getMessage e))
+                                               low-verts))
+                                    new-hi (try
+                                             (snap-vertices-to-other-shape high-verts cc fuzz *debug*)
+                                             (catch Exception e
+                                               (println (.getMessage e))
+                                               high-verts))]
                                 ;; update vertices in shape
                                 (let [old-with-new (merge (zipmap high-verts new-hi)
                                                           (zipmap low-verts new-lo))
@@ -363,7 +380,8 @@
                                          :static otype)
                                   rgb (first (:colors (get object-params otype)))
                                   geom @(:geom s)]
-                              (if (= otype :static-surface)
+                              (if (or (= otype :static-surface)
+                                      (= otype :static-wood))
                                 (assoc geom
                                   :type type :rgb rgb
                                   :shape :polyline
