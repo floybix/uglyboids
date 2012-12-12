@@ -33,19 +33,19 @@
                  :rgb [241 219 32]}})
 
 (def initial-resistances
-  {:wood 2000
-   :glass 2000
-   :stone 5000
-   :pig 50})
+  {:wood 300
+   :glass 50
+   :stone 3000
+   :pig 40})
 ;; TODO: helmet-pig, tiny-pig
 
 (def materials
   {:static {:density 1
             :friction 1.0}
    :wood {:density 2}
-   :glass {:density 3
+   :glass {:density 2
            :restitution 0}
-   :stone {:density 8}
+   :stone {:density 5}
    :pig {:density 2
          :restitution 0}
    })
@@ -53,4 +53,4 @@
 (def launch-speed 27.4)
 
 (def linear-damping 0.1)
-(def angular-damping 0.01)
+(def angular-damping 5)

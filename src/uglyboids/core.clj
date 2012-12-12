@@ -5,6 +5,7 @@
         uglyboids.physics-params)
   (:import (org.jbox2d.callbacks ContactListener)
            (org.jbox2d.collision WorldManifold)
+           (org.jbox2d.dynamics Body)
            (org.jbox2d.collision AABB)))
 
 (def scene (atom nil))
@@ -87,110 +88,8 @@ The normal points from A to B."
 (def pig-damage (atom 0.0))
 (def block-damage (atom 0.0))
 
-(defn bird-hit
-  [bird-info oth-info]
-  (let [bird (:body bird-info)
-        btyp (:type bird-info)
-        otyp (:type oth-info)
-        oth (:body oth-info)
-        odat @(user-data oth)
-        resist (:resistance odat)
-        imp (:imp oth-info)
-        ;; fraction of total force (twice impulse) to be applied to target
-        ;; (partially applied if target destroyed)
-        effectiveness (cond
-                       (= :btyp :yellow-bird)
-                       (if (= :type :wood)
-                         0.95
-                         0.20)
-                       (and (= :type :glass)
-                            (= :btyp :blue-bird))
-                       0.95
-                       (= :type :glass)
-                       0.2
-                       :else 0.5)
-        eff-imp (* 2 imp effectiveness) ;; to target (damage)
-        eff-react (* 2 imp (- 1 effectiveness))] ;; to bird (bounce)
-    (when (pos? imp)
-      (when resist
-        ;; first undo the impulses already applied to bird and block
-        (apply-impulse! bird (v-scale (:normal oth-info) imp)
-                        (:pt bird-info))
-        (apply-impulse! oth (v-scale (:normal bird-info) imp)
-                        (:pt oth-info))
-        (if (>= eff-imp resist)
-          ;; destroyed. calculate reaction to bird.
-          ;; effective resistance impulse
-          (let [net-eff-react (- eff-react resist)]
-            (apply-impulse! bird (v-scale (:normal bird-info) net-eff-react)
-                            (:pt bird-info))
-            (if (:pig? oth-info)
-              (swap! pig-tally inc)
-              (swap! block-tally inc))
-            (when (:pig? oth-info)
-                                        ;(swap! pigs dissoc oth))
-              (println "pig destroyed")
-              (reset! pigs (set (remove #(= oth %) @pigs))))
-            (when-not (:pig? oth-info)
-              (println "block destroyed"))
-            (swap! destroyed conj (:fixt oth-info))
-            (destroy! oth))
-          ;; not destroyed - but apply damage
-          (let [new-resist (- resist eff-imp)]
-            (apply-impulse! bird (v-scale (:normal bird-info) eff-react)
-                            (:pt bird-info))
-            (apply-impulse! oth (v-scale (:normal oth-info) eff-imp)
-                            (:pt oth-info))
-            (swap! (user-data oth) update-in [:resistance] - eff-imp)
-            (if (:pig? oth-info)
-              (swap! pig-damage + eff-imp)
-              (swap! block-damage + eff-imp))))))))
-
-(defn pig-hit
-  [pig-info]
-  (let [bod (:body pig-info)
-        dat @(user-data bod)
-        resist (:resistance dat)
-        imp (:imp pig-info)]
-    (when (pos? imp)
-      ;(println "pig hit, resistance" resist "impact" imp)
-      (if (>= imp resist)
-        ;; destroyed
-        (do
-          (swap! pig-tally inc)
-                                        ;(swap! pigs dissoc bod)
-          (reset! pigs (set (remove #(= bod %) @pigs)))
-          (swap! destroyed conj (:fixt pig-info))
-          (println "pig destroyed")
-          (destroy! bod))
-        ;; not destroyed - but apply damage
-        (let [new-resist (- resist imp)]
-          (swap! (user-data bod) update-in [:resistance] - imp)
-          (swap! pig-damage + imp))))))
-
-(defn block-hit
-  [info]
-  (when-not (or (@destroyed (:body info))
-                (= :static (body-type (:body info))))
-    (let [bod (:body info)
-          typ (:type info)
-          dat @(user-data bod)
-          resist (:resistance dat)
-          imp (:imp info)]
-      (when (pos? imp)
-                                        ;(println "block hit, resistance" resist "impact" imp)
-        (if (>= imp resist)
-          ;; destroyed
-          (do
-            (swap! block-tally inc)
-            (swap! destroyed conj (:fixt info))
-            (println "block destroyed")
-            (destroy! bod))
-          ;; not destroyed - but apply damage
-          (let [new-resist (- resist imp)]
-            ;; TODO - limit reaction force
-            (swap! (user-data bod) update-in [:resistance] - imp)
-            (swap! block-damage + imp)))))))
+(def tapped? (atom false))
+(def time-to-tap (atom nil))
 
 (defn make-bird!
   [bird-type]
@@ -330,6 +229,70 @@ The normal points from A to B."
      :ab-tap-t (* ab-flight tap-frac)
      :target-pt target-pt}))
 
+(defn do-hit
+  "Apply reaction or destruction to the first object (never a bird).
+   Will be called a second time with objects reversed."
+  [info oth-info]
+  (when-not (or (@destroyed (:body info))
+                (= :static (body-type (:body info))))
+    (let [bod ^Body (:body info)
+          obod ^Body (:body oth-info)
+          typ (:type info)
+          otyp (:type oth-info)
+          dat @(user-data bod)
+          odat @(user-data obod)
+          resist (:resistance dat)
+          oresist (:resistance odat)
+          imp (:imp info)
+          ;; velocity multiplier, applied after usual impulse
+          velscale (cond
+                    (= otyp :yellow-bird)
+                    (if (= typ :wood)
+                      0.95
+                      0.2)
+                    (and (= otyp :blue-bird)
+                         (= typ :glass))
+                    0.95
+                    (or (= typ :glass)
+                        (= otyp :glass))
+                    0.2
+                    :else 0.75)
+          speed (v-mag (linear-velocity bod))
+          ospeed (v-mag (linear-velocity obod))
+          non-trivial? (and (>= imp 10.0)
+                            (>= (max speed ospeed) 0.5))]
+      (when non-trivial?
+        (println "impulse" imp typ "vs" otyp "resist" resist "speeds" speed ospeed)
+        (if (>= imp resist)
+          ;; destroyed
+          (do
+            (println typ "destroyed")
+            (if (:pig? info)
+              (do
+                (swap! pig-tally inc)
+                                        ;(swap! pigs dissoc bod)
+                (reset! pigs (set (remove #(= bod %) @pigs))))
+              ;; otherwise - block
+              (do
+                (swap! block-tally inc)))
+            (swap! destroyed conj (:fixt info))
+            (destroy! bod)
+            ;; let bird smash through
+            (when (:bird oth-info)
+              ;; undo the impulse already applied to bird
+              (apply-impulse! obod (v-scale (:normal info) imp)
+                              (:pt oth-info))))
+          ;; not destroyed - but apply damage
+          (let [new-resist (- resist imp)]
+            (println typ " damaged, scaled velocity by" velscale)
+            (.setLinearVelocity bod (vec2 (v-scale (linear-velocity bod) velscale)))
+            (swap! (user-data bod) update-in [:resistance] - imp)
+            (let [damage (if (:pig? info) pig-damage block-damage)]
+              (swap! damage + imp))))
+        (when (:bird oth-info)
+          (println "bird hit" typ ", scaled velocity by" velscale)
+          (.setLinearVelocity obod (vec2 (v-scale (linear-velocity obod) velscale))))))))
+
 (defn game-step!
   []
   (doseq [ctct  @contact-buffer] 
@@ -349,17 +312,10 @@ The normal points from A to B."
                             :normal (mapv - normal)) ;; pointing from B to A
               info-b (assoc (second infos) :pt pt :imp imp
                             :normal normal)]
-          (cond
-           (:bird info-a) (bird-hit info-a info-b)
-           (:bird info-b) (bird-hit info-b info-a)
-           (:pig? info-a) (do
-                            (pig-hit info-a)
-                            (when (:pig? info-b)
-                              (pig-hit info-b)))
-           (:pig? info-b) (pig-hit info-b)
-           :else (do
-                   (block-hit info-a)
-                   (block-hit info-b)))))))
+          (when-not (:bird info-b)
+            (do-hit info-b info-a))
+          (when-not (:bird info-a)
+            (do-hit info-a info-b))))))
     (reset! contact-buffer []))
 
 (defn simulate-for
